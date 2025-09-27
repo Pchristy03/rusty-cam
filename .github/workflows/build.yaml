@@ -1,4 +1,4 @@
-name: Build for Raspberry Pi
+name: Build for Raspberry Pi (Docker)
 
 on:
   push:
@@ -12,48 +12,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install cross-compilation tools and libraries
+      - name: Build in Docker container
         run: |
-          sudo dpkg --add-architecture armhf
-          sudo apt-get update
-          sudo apt-get install -y \
-            gcc-arm-linux-gnueabihf \
-            pkg-config \
-            libglib2.0-dev:armhf \
-            libgstreamer1.0-dev:armhf \
-            libgstreamer-plugins-base1.0-dev:armhf \
-            libgstreamer-plugins-good1.0-dev:armhf \
-            libgstreamer-plugins-bad1.0-dev:armhf
-
-      - name: Add ARM target
-        run: rustup target add armv7-unknown-linux-gnueabihf
-
-      - name: Configure cross-compilation
-        run: |
-          mkdir -p ~/.cargo
-          cat >> ~/.cargo/config.toml << EOF
-          [target.armv7-unknown-linux-gnueabihf]
-          linker = "arm-linux-gnueabihf-gcc"
-
-          [env]
-          PKG_CONFIG_ALLOW_CROSS = "1"
-          PKG_CONFIG_PATH = "/usr/lib/arm-linux-gnueabihf/pkgconfig"
-          PKG_CONFIG_LIBDIR = "/usr/lib/arm-linux-gnueabihf/pkgconfig"
-          EOF
-
-      - name: Build for Raspberry Pi
-        env:
-          PKG_CONFIG_ALLOW_CROSS: "1"
-          PKG_CONFIG_PATH: "/usr/lib/arm-linux-gnueabihf/pkgconfig"
-          PKG_CONFIG_LIBDIR: "/usr/lib/arm-linux-gnueabihf/pkgconfig"
-        run: cargo build --target armv7-unknown-linux-gnueabihf --release
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            --platform linux/arm/v7 \
+            rust:latest bash -c "
+              # Install system dependencies
+              apt-get update && apt-get install -y \
+                pkg-config \
+                libglib2.0-dev \
+                libgstreamer1.0-dev \
+                libgstreamer-plugins-base1.0-dev \
+                libgstreamer-plugins-good1.0-dev \
+                libgstreamer-plugins-bad1.0-dev && \
+              
+              # Build the project
+              cargo build --release
+            "
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
-          name: raspberry-pi-binary
-          path: target/armv7-unknown-linux-gnueabihf/release/*
+          name: raspberry-pi-binary-docker
+          path: target/release/*
           retention-days: 5
