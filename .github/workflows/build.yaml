@@ -1,0 +1,25 @@
+name: Build for Raspberry Pi
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install cross
+        run: cargo install cross
+
+      - name: Build for armv7
+        run: cross build --target armv7-unknown-linux-gnueabihf --release
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: raspberry-pi-binary
+          path: target/armv7-unknown-linux-gnueabihf/release/rust-cam
