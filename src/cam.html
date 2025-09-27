@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Rust WebRTC Test</title>
+  </head>
+  <body>
+    <button id="connect-to-camera">Connect to Camera Peer</button>
+    <div id="client-id"></div>
+    <video id="remote-video" autoplay playsinline></video>
+    <script>
+      let ws;
+      let pc;
+      const localId = "client_peer_" + Math.random().toString(36).slice(2, 10);
+
+      const remoteId = "camera_peer";
+      const connectToCameraBtn = document.getElementById("connect-to-camera");
+      const clientIdDiv = document.getElementById("client-id");
+
+      if (connectToCameraBtn) {
+        connectToCameraBtn.onclick = async function () {
+          await connectToCamera();
+        };
+      }
+
+      async function connectToCamera() {
+        const pendingCandidates = [];
+
+        ws = new WebSocket("ws://192.168.1.104:3000/ws");
+
+        pc = new RTCPeerConnection();
+        pc.addTransceiver("video", { direction: "recvonly" });
+        setInterval(async () => {
+          if (pc) {
+            const stats = await pc.getStats();
+            stats.forEach((report) => {
+              if (report.type === "inbound-rtp") {
+                console.log(report);
+              }
+            });
+          }
+        }, 1000);
+
+        // Enhanced stats checking
+        setInterval(async () => {
+          if (pc) {
+            const stats = await pc.getStats();
+            const reports = Array.from(stats.values());
+
+            console.log("=== WebRTC Stats ===");
+            reports.forEach((report) => {
+              if (report.type === "inbound-rtp") {
+                console.log("Inbound RTP:", {
+                  mediaType: report.mediaType,
+                  packetsReceived: report.packetsReceived,
+                  packetsLost: report.packetsLost,
+                  bytesReceived: report.bytesReceived,
+                  framesDecoded: report.framesDecoded,
+                  framesDropped: report.framesDropped,
+                  codecId: report.codecId,
+                });
+              } else if (report.type === "codec") {
+                console.log("Codec:", {
+                  mimeType: report.mimeType,
+                  payloadType: report.payloadType,
+                  clockRate: report.clockRate,
+                });
+              }
+            });
+          }
+        }, 3000);
+
+        pc.ontrack = async (event) => {
+          const videoEl = document.getElementById("remote-video");
+
+          // Log stream info
+          const stream = event.streams[0];
+          videoEl.srcObject = stream;
+
+          try {
+            await videoEl.play();
+            console.log("Video play() succeeded");
+          } catch (error) {
+            console.error("Video play() failed:", error);
+          }
+        };
+
+        // ICE candidates: send them to Rust signaling server
+        pc.onicecandidate = (event) => {
+          if (event.candidate) {
+            ws.send(
+              JSON.stringify({
+                candidate: event.candidate.candidate,
+                from: localId,
+                to: remoteId,
+              })
+            );
+          }
+        };
+
+        ws.onmessage = async (event) => {
+          const msg = JSON.parse(event.data);
+          if (msg.answer_to) {
+            console.log("Received answer SDP");
+            const remoteDesc = new RTCSessionDescription({
+              type: "answer",
+              sdp: msg.sdp,
+            });
+
+            if (clientIdDiv) {
+              clientIdDiv.textContent = `ClientId: ${msg.answer_to}`;
+            }
+            await pc.setRemoteDescription(remoteDesc);
+            console.log("Remote description set");
+
+            // flush queued ICE candidates
+            for (const c of pendingCandidates) {
+              try {
+                await pc.addIceCandidate(c);
+              } catch (err) {
+                console.error("Failed to add queued ICE candidate", err);
+              }
+            }
+          } else if (msg.candidate) {
+            const candidate = { candidate: msg.candidate };
+            if (pc.remoteDescription) {
+              // safe to add right away
+              await pc.addIceCandidate(candidate);
+            } else {
+              // queue until remote desc is ready
+              pendingCandidates.push(candidate);
+            }
+          }
+        };
+
+        ws.onopen = async () => {
+          console.log("WebSocket connected, sending offer");
+          // Create an offer and send it
+          const offer = await pc.createOffer({ offerToReceiveVideo: true });
+          await pc.setLocalDescription(offer);
+          ws.send(
+            JSON.stringify({
+              sdp: offer.sdp,
+              from: localId,
+              offer_to: remoteId,
+            })
+          );
+        };
+      }
+    </script>
+  </body>
+</html>
