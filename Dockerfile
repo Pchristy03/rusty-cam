@@ -2,7 +2,8 @@
 # docker build -t rusty-cam-builder .
 # docker run --rm -v $(pwd)/target:/app/target rusty-cam-builder
 
-FROM ubuntu:22.04
+# FROM ubuntu:22.04
+FROM arm64v8/ubuntu:22.04
 
 # Set timezone to avoid interactive prompts
 ENV TZ=UTC
