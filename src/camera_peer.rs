@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::thread::sleep;
 use std::time::Duration;
 
 use serde_json::Value;
@@ -236,9 +235,19 @@ pub async fn connect_camera_to_ws() {
 pub async fn start_video_track(video_track: Arc<TrackLocalStaticSample>) -> anyhow::Result<()> {
     gst::init()?;
 
-    // More compatible pipeline
+    #[cfg(feature = "mac")]
     let pipeline = gst::parse::launch(
         "avfvideosrc device-index=0 ! \
+         videoconvert ! \
+         video/x-raw,format=I420,width=640,height=480,framerate=30/1 ! \
+         x264enc speed-preset=ultrafast tune=zerolatency bitrate=1000 key-int-max=30 ! \
+         video/x-h264,profile=constrained-baseline,stream-format=byte-stream,alignment=au ! \
+         appsink name=sink emit-signals=true sync=false max-buffers=1 drop=true",
+    )?;
+
+    #[cfg(feature = "linux")]
+    let pipeline = gst::parse::launch(
+        "v4l2src device=/dev/video0 ! \
          videoconvert ! \
          video/x-raw,format=I420,width=640,height=480,framerate=30/1 ! \
          x264enc speed-preset=ultrafast tune=zerolatency bitrate=1000 key-int-max=30 ! \

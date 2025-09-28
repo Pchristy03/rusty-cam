@@ -25,7 +25,7 @@
       async function connectToCamera() {
         const pendingCandidates = [];
 
-        ws = new WebSocket("ws://192.168.1.104:3000/ws");
+        ws = new WebSocket("ws://192.168.1.249:3000/ws");
 
         pc = new RTCPeerConnection();
         pc.addTransceiver("video", { direction: "recvonly" });
@@ -39,35 +39,6 @@
             });
           }
         }, 1000);
-
-        // Enhanced stats checking
-        setInterval(async () => {
-          if (pc) {
-            const stats = await pc.getStats();
-            const reports = Array.from(stats.values());
-
-            console.log("=== WebRTC Stats ===");
-            reports.forEach((report) => {
-              if (report.type === "inbound-rtp") {
-                console.log("Inbound RTP:", {
-                  mediaType: report.mediaType,
-                  packetsReceived: report.packetsReceived,
-                  packetsLost: report.packetsLost,
-                  bytesReceived: report.bytesReceived,
-                  framesDecoded: report.framesDecoded,
-                  framesDropped: report.framesDropped,
-                  codecId: report.codecId,
-                });
-              } else if (report.type === "codec") {
-                console.log("Codec:", {
-                  mimeType: report.mimeType,
-                  payloadType: report.payloadType,
-                  clockRate: report.clockRate,
-                });
-              }
-            });
-          }
-        }, 3000);
 
         pc.ontrack = async (event) => {
           const videoEl = document.getElementById("remote-video");

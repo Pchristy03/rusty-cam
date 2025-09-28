@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    fs,
     net::SocketAddr,
     sync::{Arc, Mutex},
     time::Duration,
@@ -8,8 +9,8 @@ use std::{
 use axum::{
     Router,
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
-    response::Response,
-    routing::any,
+    response::{Html, Response},
+    routing::{any, get},
 };
 
 use futures_util::{SinkExt, StreamExt};
@@ -29,11 +30,6 @@ pub async fn start_server() {
 
     async fn handle_socket(socket: WebSocket, peers: Peers) {
         let mut current_peer: Option<String> = None;
-        println!("-- CONNECTED PEERS --\n");
-        for (key, _) in peers.lock().unwrap().iter() {
-            println!("{}", key)
-        }
-        println!("\n---------------------");
         let (mut write, mut read) = socket.split();
         let (sendertx, mut receiverrx) = mpsc::unbounded_channel::<Message>();
 
@@ -152,14 +148,22 @@ pub async fn start_server() {
 
     let peers: Peers = Arc::new(Mutex::new(HashMap::new()));
 
+    async fn home_page() -> Html<String> {
+        // Read the HTML file from disk
+        let html = fs::read_to_string("static/cam.html").expect("Failed to read cam.html");
+        Html(html)
+    }
+
     // Build the router
-    let app = Router::new().route(
-        "/ws",
-        any({
-            let peers = peers.clone();
-            move |ws| handler(ws, peers)
-        }),
-    );
+    let app = Router::new()
+        .route(
+            "/ws",
+            any({
+                let peers = peers.clone();
+                move |ws| handler(ws, peers)
+            }),
+        )
+        .route("/home", get(home_page));
 
     const PING_INTERVAL: u64 = 30;
     let peers_clone = peers.clone();
@@ -179,6 +183,11 @@ pub async fn start_server() {
                     true
                 }
             });
+            println!("-- CONNECTED PEERS --\n");
+            for (key, _) in peers.lock().unwrap().iter() {
+                println!("{}", key)
+            }
+            println!("\n---------------------");
         }
     });
 
