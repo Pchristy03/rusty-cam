@@ -1,45 +1,22 @@
-name: Build for Raspberry Pi (Docker)
-
-on:
-  push:
-    branches: [main, master]
-  pull_request:
-    branches: [main, master]
-
+name: Build for Raspberry Pi
+on: [push]
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up QEMU for ARM emulation
-        uses: docker/setup-qemu-action@v3
+      - uses: actions/checkout@v3
+      - uses: actions-rs/toolchain@v1
         with:
-          platforms: arm
-
-      - name: Build in Docker container
+          toolchain: stable
+          target: aarch64-unknown-linux-gnu
+      - name: Install dependencies
         run: |
-          docker run --rm \
-            -v ${{ github.workspace }}:/workspace \
-            -w /workspace \
-            --platform linux/arm/v7 \
-            rust:latest bash -c "
-              # Install system dependencies
-              apt-get update && apt-get install -y \
-                pkg-config \
-                libglib2.0-dev \
-                libgstreamer1.0-dev \
-                libgstreamer-plugins-base1.0-dev \
-                libgstreamer-plugins-good1.0-dev \
-                libgstreamer-plugins-bad1.0-dev && \
-              
-              # Build the project
-              cargo build --release
-            "
-
-      - name: Upload binary artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: raspberry-pi-binary-docker
-          path: target/release/*
-          retention-days: 5
+          sudo apt update
+          sudo apt install -y gcc-aarch64-linux-gnu
+          sudo dpkg --add-architecture arm64
+          sudo apt install -y libgstreamer1.0-dev:arm64 libgstreamer-plugins-base1.0-dev:arm64
+      - name: Build
+        run: cargo build --target aarch64-unknown-linux-gnu --release
+        env:
+          PKG_CONFIG_ALLOW_CROSS: 1
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
