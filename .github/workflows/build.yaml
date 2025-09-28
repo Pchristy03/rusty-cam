@@ -1,22 +1,78 @@
+# name: Build for Raspberry Pi
+# on: [push]
+# jobs:
+#   build:
+#     runs-on: ubuntu-latest
+#     steps:
+#       - uses: actions/checkout@v3
+#       - uses: actions-rs/toolchain@v1
+#         with:
+#           toolchain: stable
+#           target: aarch64-unknown-linux-gnu
+#       - name: Install GStreamer dev libraries
+#         run: |
+#           sudo apt-get update
+#           sudo apt-get install -y \
+#           libgstreamer1.0-dev \
+#           libgstreamer-plugins-base1.0-dev
+#       - name: Build
+#         run: cargo build --target aarch64-unknown-linux-gnu --release
+#         env:
+#           PKG_CONFIG_ALLOW_CROSS: 1
+#           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+
 name: Build for Raspberry Pi
-on: [push]
+on: [push, pull_request]
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions-rs/toolchain@v1
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
           target: aarch64-unknown-linux-gnu
-      - name: Install GStreamer dev libraries
+          override: true
+
+      - name: Install cross-compilation tools
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-          libgstreamer1.0-dev \
-          libgstreamer-plugins-base1.0-dev
-      - name: Build
+          sudo apt update
+          sudo apt install -y gcc-aarch64-linux-gnu pkg-config
+
+      - name: Install GStreamer dependencies for cross-compilation
+        run: |
+          # Add arm64 architecture
+          sudo dpkg --add-architecture arm64
+
+          # Update package lists
+          sudo apt update
+
+          # Install cross-compilation GStreamer libraries
+          sudo apt install -y \
+            libgstreamer1.0-dev:arm64 \
+            libgstreamer-plugins-base1.0-dev:arm64 \
+            libgstreamer-plugins-good1.0-dev:arm64 \
+            libgstreamer-plugins-bad1.0-dev:arm64
+
+      - name: Configure cargo for cross-compilation
+        run: |
+          mkdir -p ~/.cargo
+          cat >> ~/.cargo/config.toml << EOF
+          [target.aarch64-unknown-linux-gnu]
+          linker = "aarch64-linux-gnu-gcc"
+          EOF
+
+      - name: Build for aarch64
         run: cargo build --target aarch64-unknown-linux-gnu --release
         env:
           PKG_CONFIG_ALLOW_CROSS: 1
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          PKG_CONFIG_PATH_aarch64_unknown_linux_gnu: /usr/lib/aarch64-linux-gnu/pkgconfig
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: rusty-cam-aarch64
+          path: target/aarch64-unknown-linux-gnu/release/rusty-cam
