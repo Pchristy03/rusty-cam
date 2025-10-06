@@ -1,20 +1,83 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <title>Rust WebRTC Test</title>
+    <title>Baby Monitor</title>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/bootstrap@4.3.1/dist/css/bootstrap.min.css"
+      integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T"
+      crossorigin="anonymous"
+    />
   </head>
   <body>
-    <button id="connect-to-camera">Connect to Camera Peer</button>
-    <div id="client-id"></div>
-    <video id="remote-video" autoplay playsinline></video>
+    <div style="width: 100vw; height: 100vh; background-color: #f8f9fa">
+      <div
+        class="d-flex flex-column justify-content-start align-items-center h-100 py-3"
+        style="gap: 1rem"
+      >
+        <!-- Connect Button -->
+        <button
+          class="btn btn-primary"
+          id="connect-to-camera"
+          style="
+            width: 80%;
+            max-width: 400px;
+            height: 80px;
+            font-size: 1.5rem;
+            border-radius: 12px;
+          "
+        >
+          Connect to Camera
+        </button>
+
+        <!-- Client ID -->
+        <div
+          id="client-id"
+          style="font-size: 1.2rem; font-weight: 500; text-align: center"
+        ></div>
+
+        <!-- Connection Status -->
+        <div
+          id="is-alive-status"
+          style="font-size: 1.2rem; font-weight: 500; text-align: center"
+        ></div>
+
+        <!-- Video -->
+        <div
+          class="d-flex justify-content-center align-items-center"
+          style="width: 100%; flex-grow: 1"
+        >
+          <video
+            id="remote-video"
+            autoplay
+            playsinline
+            controls
+            style="
+              display: none;
+              width: 100%;
+              aspect-ratio: 4 / 3;
+              object-fit: contain;
+              border-radius: 8px;
+              box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+              background-color: black;
+            "
+          ></video>
+          <!-- <audio id="remote-audio" autoplay playsinline></audio> -->
+        </div>
+      </div>
+    </div>
+
     <script>
       let ws;
       let pc;
+      let lastPing;
+      let combinedTrack = new MediaStream();
       const localId = "client_peer_" + Math.random().toString(36).slice(2, 10);
 
       const remoteId = "camera_peer";
       const connectToCameraBtn = document.getElementById("connect-to-camera");
       const clientIdDiv = document.getElementById("client-id");
+      const isAliveDiv = document.getElementById("is-alive-status");
 
       if (connectToCameraBtn) {
         connectToCameraBtn.onclick = async function () {
@@ -29,29 +92,41 @@
 
         pc = new RTCPeerConnection();
         pc.addTransceiver("video", { direction: "recvonly" });
+        pc.addTransceiver("audio", { direction: "recvonly" });
+
         setInterval(async () => {
-          if (pc) {
-            const stats = await pc.getStats();
-            stats.forEach((report) => {
-              if (report.type === "inbound-rtp") {
-                console.log(report);
-              }
-            });
-          }
+          const stats = await pc.getStats();
+          stats.forEach((report) => {
+            if (report.type === "inbound-rtp" && report.kind === "audio") {
+              console.log(
+                `Audio received: packets=${report.packetsReceived}, bytes=${report.bytesReceived}`
+              );
+            }
+          });
         }, 1000);
 
         pc.ontrack = async (event) => {
           const videoEl = document.getElementById("remote-video");
+          if (event.track.kind === "video") {
+            // Log stream info
+            console.log(typeof event.streams[0]);
+            combinedTrack.addTrack(event.streams[0].getTracks()[0]);
+          }
 
-          // Log stream info
-          const stream = event.streams[0];
-          videoEl.srcObject = stream;
+          if (event.track.kind === "audio") {
+            console.log(typeof event.streams[0].getTracks()[0]);
+            combinedTrack.addTrack(event.streams[0].getTracks()[0]);
+          }
 
-          try {
-            await videoEl.play();
-            console.log("Video play() succeeded");
-          } catch (error) {
-            console.error("Video play() failed:", error);
+          if (combinedTrack.getTracks().length == 2) {
+            videoEl.srcObject = combinedTrack;
+            try {
+              await videoEl.play();
+              videoEl.style.display = "";
+              console.log("Video and Audio play() succeeded");
+            } catch (error) {
+              console.error("Video and Audio play() failed:", error);
+            }
           }
         };
 
@@ -67,6 +142,16 @@
             );
           }
         };
+
+        setInterval(() => {
+          const now = Date.now();
+          if (now - lastPing > 6000) {
+            // 6 seconds threshold
+            if (isAliveDiv) {
+              isAliveDiv.textContent = "Connection Lost ⚠️";
+            }
+          }
+        }, 1000);
 
         ws.onmessage = async (event) => {
           const msg = JSON.parse(event.data);
@@ -99,6 +184,11 @@
             } else {
               // queue until remote desc is ready
               pendingCandidates.push(candidate);
+            }
+          } else if (msg.t && msg.t === "ping") {
+            if (isAliveDiv) {
+              lastPing = Date.now();
+              isAliveDiv.textContent = "Connection Stable ✅";
             }
           }
         };

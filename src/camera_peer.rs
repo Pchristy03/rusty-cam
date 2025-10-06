@@ -38,10 +38,24 @@ pub async fn connect_camera_to_ws() {
             ..Default::default()
         },
         "video".to_string(),
-        "rustwebrtc".to_string(),
+        "rustwebrtc_video".to_string(),
+    ));
+
+    let audio_track = Arc::new(TrackLocalStaticSample::new(
+        RTCRtpCodecCapability {
+            mime_type: "audio/opus".to_string(),
+            clock_rate: 48000,
+            channels: 2,
+            sdp_fmtp_line: "".to_string(),
+            rtcp_feedback: vec![],
+            ..Default::default()
+        },
+        "audio".to_string(),
+        "rustwebrtc_audio".to_string(),
     ));
 
     start_video_track(video_track.clone()).await.unwrap();
+    start_audio_track(audio_track.clone()).await.unwrap();
 
     println!("[WS] Connected to signaling server");
 
@@ -131,6 +145,7 @@ pub async fn connect_camera_to_ws() {
                                 .insert(from.clone(), pc.clone());
 
                             pc.add_track(video_track.clone()).await.unwrap();
+                            pc.add_track(audio_track.clone()).await.unwrap();
                             println!("[WebRTC] Video track added to peer connection");
 
                             // the offers needs are recorded (sdp)
@@ -236,27 +251,24 @@ pub async fn start_video_track(video_track: Arc<TrackLocalStaticSample>) -> anyh
     gst::init()?;
 
     #[cfg(feature = "mac")]
-    let pipeline = gst::parse::launch(
-        "avfvideosrc device-index=0 ! \
-         videoconvert ! \
-         video/x-raw,format=I420,width=640,height=480,framerate=30/1 ! \
-         x264enc speed-preset=ultrafast tune=zerolatency bitrate=1000 key-int-max=30 ! \
-         video/x-h264,profile=constrained-baseline,stream-format=byte-stream,alignment=au ! \
-         appsink name=sink emit-signals=true sync=false max-buffers=1 drop=true",
-    )?;
+    let program_and_device = "avfvideosrc device-index=0";
 
     #[cfg(feature = "linux")]
-    let pipeline = gst::parse::launch(
-        "v4l2src device=/dev/video0 ! \
+    let program_and_device = "v4l2src device=/dev/video0";
+
+    let video_pipeline = gst::parse::launch(&format!(
+        "{} ! \
          videoconvert ! \
          video/x-raw,format=I420,width=640,height=480,framerate=30/1 ! \
          x264enc speed-preset=ultrafast tune=zerolatency bitrate=1000 key-int-max=30 ! \
          video/x-h264,profile=constrained-baseline,stream-format=byte-stream,alignment=au ! \
          appsink name=sink emit-signals=true sync=false max-buffers=1 drop=true",
-    )?;
+        program_and_device
+    ))?;
 
-    let pipeline = pipeline.dynamic_cast::<gst::Pipeline>().unwrap();
-    let sink = pipeline
+    // video pipeline
+    let vpipeline = video_pipeline.dynamic_cast::<gst::Pipeline>().unwrap();
+    let vsink = vpipeline
         .by_name("sink")
         .unwrap()
         .dynamic_cast::<gst_app::AppSink>()
@@ -267,15 +279,15 @@ pub async fn start_video_track(video_track: Arc<TrackLocalStaticSample>) -> anyh
         .field("stream-format", "byte-stream")
         .field("alignment", "au")
         .build();
-    sink.set_caps(Some(&caps));
+    vsink.set_caps(Some(&caps));
 
-    pipeline.set_state(gst::State::Playing)?;
+    vpipeline.set_state(gst::State::Playing)?;
     println!("[GStreamer] Pipeline started");
 
     tokio::spawn(async move {
         println!("Started Video Thread");
         loop {
-            if let Ok(sample) = sink.pull_sample() {
+            if let Ok(sample) = vsink.pull_sample() {
                 if let Some(buffer) = sample.buffer() {
                     if let Ok(map) = buffer.map_readable() {
                         let data = map.as_slice();
@@ -284,6 +296,56 @@ pub async fn start_video_track(video_track: Arc<TrackLocalStaticSample>) -> anyh
                             .write_sample(&Sample {
                                 data: data.to_vec().into(),
                                 duration: Duration::from_millis(33),
+                                ..Default::default()
+                            })
+                            .await;
+                    }
+                }
+            }
+        }
+    });
+
+    Ok(())
+}
+
+pub async fn start_audio_track(audio_track: Arc<TrackLocalStaticSample>) -> anyhow::Result<()> {
+    #[cfg(feature = "mac")]
+    let audio_prog = "osxaudiosrc";
+
+    #[cfg(feature = "linux")]
+    let audio_prog = "alsasrc device=hw:2,0";
+
+    let audio_pipeline = gst::parse::launch(&format!(
+        "{} ! audioconvert ! audioresample ! audio/x-raw,channels=1,rate=48000 ! queue ! opusenc ! appsink name=audio_sink",
+        audio_prog
+    ))?;
+
+    let apipeline = audio_pipeline.dynamic_cast::<gst::Pipeline>().unwrap();
+    let asink = apipeline
+        .by_name("audio_sink")
+        .unwrap()
+        .dynamic_cast::<gst_app::AppSink>()
+        .unwrap();
+
+    let acaps = gst::Caps::builder("audio/x-opus")
+        .field("rate", 48000i32)
+        .field("channels", 1i32)
+        .build();
+    asink.set_caps(Some(&acaps));
+
+    apipeline.set_state(gst::State::Playing)?;
+
+    tokio::spawn(async move {
+        println!("Started Video Thread");
+        loop {
+            if let Ok(sample) = asink.pull_sample() {
+                if let Some(buffer) = sample.buffer() {
+                    if let Ok(map) = buffer.map_readable() {
+                        let data = map.as_slice();
+                        let _ = audio_track
+                            .write_sample(&Sample {
+                                data: data.to_vec().into(),
+                                duration: Duration::from_millis(20),
                                 ..Default::default()
                             })
                             .await;

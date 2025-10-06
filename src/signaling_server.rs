@@ -149,9 +149,8 @@ pub async fn start_server() {
     let peers: Peers = Arc::new(Mutex::new(HashMap::new()));
 
     async fn home_page() -> Html<String> {
-        // Read the HTML file from disk
-        let html = fs::read_to_string("static/cam.html").expect("Failed to read cam.html");
-        Html(html)
+        let html = include_str!("static/cam.html");
+        Html(html.to_string())
     }
 
     // Build the router
@@ -165,7 +164,7 @@ pub async fn start_server() {
         )
         .route("/home", get(home_page));
 
-    const PING_INTERVAL: u64 = 30;
+    const PING_INTERVAL: u64 = 5;
     let peers_clone = peers.clone();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(PING_INTERVAL));
@@ -176,6 +175,9 @@ pub async fn start_server() {
                 if sender
                     .send(Message::Ping(Bytes::from(format!("{}", key))))
                     .is_err()
+                    || sender
+                        .send(Message::Text("{ \"t\": \"ping\"}".into()))
+                        .is_err()
                 {
                     println!("Removing dead peer: {}", key);
                     false

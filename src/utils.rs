@@ -35,4 +35,7 @@ pub enum SignalMessage {
         from: String,
         to: String,
     },
+    Ping {
+        t: String,
+    },
 }
