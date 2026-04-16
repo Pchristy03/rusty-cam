@@ -1,6 +1,7 @@
-# Build Command
+# Cross-compile toolchain image. Source is bind-mounted at /app (see build.sh).
+#
 # docker build -t rusty-cam-builder .
-# docker run --rm -v $(pwd)/target:/app/target rusty-cam-builder
+# docker run --rm -v "$(pwd):/app" -v "$(pwd)/target:/app/target" -w /app rusty-cam-builder
 
 FROM ubuntu:22.04
 
@@ -43,6 +44,13 @@ ENV PKG_CONFIG_ALLOW_CROSS=1
 ENV PKG_CONFIG_PATH_aarch64_unknown_linux_gnu=/usr/lib/aarch64-linux-gnu/pkgconfig
 
 WORKDIR /app
-COPY . .
+
+# Manifests + sources Cargo needs to see a valid package (otherwise: "no targets
+# specified"). This layer still caches until Cargo.toml/Cargo.lock or src/ change.
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
+# Older Cargo only supports `cargo fetch --target` (no --features). This still
+# populates the registry cache; `cargo build` resolves linux-only deps later.
+RUN cargo fetch --target aarch64-unknown-linux-gnu
 
 CMD ["cargo", "build", "--target", "aarch64-unknown-linux-gnu", "--release", "--no-default-features", "--features", "linux"]

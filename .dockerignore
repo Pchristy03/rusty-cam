@@ -1,0 +1,10 @@
+# Build output (large; host bind-mounts target/ at run time)
+/target
+
+# Version control and junk
+.git
+.gitignore
+**/.DS_Store
+
+# Not needed for the image manifest layer
+*.md

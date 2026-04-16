@@ -1,0 +1,44 @@
+# Install on the Pi (units must live under /etc/systemd/system/ before enable):
+#
+# Option A — from your laptop, copy the deploy folder then run the installer on the Pi:
+#   scp -r deploy parkerc@pchristy:
+#   ssh parkerc@pchristy 'bash ~/deploy/install-on-pi.sh'
+#
+# Option B — on the Pi, from a git clone of this repo:
+#   bash deploy/install-on-pi.sh
+#
+# Option C — manual:
+#   sudo cp deploy/rusty-cam.service deploy/rusty-cam.path deploy/rusty-cam-restart.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now rusty-cam.service rusty-cam.path
+#
+# Auto-restart when you deploy a new binary (same path as ExecStart below):
+#   rusty-cam.path watches this file; see deploy/rusty-cam.path comments.
+#
+# Adjust User, Group, and ExecStart below to match your system.
+
+[Unit]
+Description=Rusty Cam WebRTC / signaling server
+After=network-online.target local-fs.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=parkerc
+Group=parkerc
+# Binary path should match where you install (e.g. build.sh scp destination).
+ExecStart=/home/parkerc/binary-rusty-cam
+WorkingDirectory=/home/parkerc
+
+# Camera and microphone access on typical Debian/Raspberry Pi OS installs.
+SupplementaryGroups=video audio
+
+Restart=always
+RestartSec=5
+
+# Logs: journalctl -u rusty-cam -f
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

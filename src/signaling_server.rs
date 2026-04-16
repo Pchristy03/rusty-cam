@@ -1,6 +1,5 @@
 use std::{
     collections::HashMap,
-    fs,
     net::SocketAddr,
     sync::{Arc, Mutex},
     time::Duration,
@@ -16,9 +15,7 @@ use axum::{
 use futures_util::{SinkExt, StreamExt};
 use tokio::{net::TcpListener, sync::mpsc};
 
-use crate::utils::SignalMessage;
-
-use bytes::Bytes;
+use crate::{camera_peer::connect_camera_to_ws, utils::SignalMessage};
 
 type Tx = mpsc::UnboundedSender<Message>;
 type Peers = Arc<Mutex<HashMap<String, Tx>>>;
@@ -53,6 +50,12 @@ pub async fn start_server() {
                         }
                     };
 
+                    // Viewers never send Register; tie this socket to their id on first Offer so we
+                    // remove them from the peers map when the tab disconnects or refreshes.
+                    if let SignalMessage::Offer { from, .. } = &incoming {
+                        current_peer = Some(from.clone());
+                    }
+
                     if current_peer.is_none() {
                         if let SignalMessage::Register { from } = incoming.clone() {
                             println!("Adding Id: {} via register", from);
@@ -74,7 +77,7 @@ pub async fn start_server() {
                             if tx.send(Message::Text(text.clone())).is_err() {
                                 eprintln!("failed to send to peer {} (receiver dropped)", offer_to);
                             } else {
-                                println!("Sending to: {}", offer_to);
+                                println!("Sending Offer to: {}", offer_to);
                             }
                         } else {
                             println!("Peer with Id: {} not present", offer_to)
@@ -90,7 +93,7 @@ pub async fn start_server() {
                                     answer_to
                                 );
                             } else {
-                                println!("Sending to: {}", answer_to);
+                                println!("Sending Answer to: {}", answer_to);
                             }
                         } else {
                             println!("Peer with Id: {} not present", answer_to)
@@ -103,7 +106,7 @@ pub async fn start_server() {
                             if tx.send(Message::Text(text.clone())).is_err() {
                                 eprintln!("failed to send to peer {} (receiver dropped)", to);
                             } else {
-                                println!("Sending to: {}", to);
+                                println!("Sending Candidate to: {}", to);
                             }
                         } else {
                             println!("Peer with Id: {} not present", to)
@@ -116,11 +119,19 @@ pub async fn start_server() {
                             if tx.send(Message::Text(text)).is_err() {
                                 eprintln!("failed to send to peer {} (receiver dropped)", to);
                             } else {
-                                println!("Sending to: {}", to);
+                                println!("Sending Video to: {}", to);
                             }
                         } else {
                             println!("Peer with Id: {} not present", to)
                         }
+                    }
+                }
+                Message::Ping(payload) => {
+                    if sendertx
+                        .send(Message::Pong(payload))
+                        .is_err()
+                    {
+                        break;
                     }
                 }
                 Message::Pong(data) => {
@@ -130,9 +141,8 @@ pub async fn start_server() {
                     println!("WebSocket closed gracefully");
                     break;
                 }
-                _ => {
-                    println!("Unsupported Message Type. Exiting peer connection...");
-                    break;
+                Message::Binary(_) => {
+                    eprintln!("Ignoring unexpected WebSocket binary frame");
                 }
             }
         }
@@ -148,9 +158,13 @@ pub async fn start_server() {
 
     let peers: Peers = Arc::new(Mutex::new(HashMap::new()));
 
+    const CAM_HTML_TEMPLATE: &str = include_str!("static/cam.html");
+
     async fn home_page() -> Html<String> {
-        let html = include_str!("static/cam.html");
-        Html(html.to_string())
+        let version = concat!("rusty-cam v", env!("CARGO_PKG_VERSION"));
+        Html(
+            CAM_HTML_TEMPLATE.replace("__RUSTY_CAM_VERSION__", version),
+        )
     }
 
     // Build the router
@@ -171,13 +185,13 @@ pub async fn start_server() {
 
         loop {
             interval.tick().await;
-            peers_clone.lock().unwrap().retain(|key, sender| {
+            let mut locked = peers_clone.lock().unwrap();
+            locked.retain(|key, sender| {
+                // One text frame per tick: enough for the viewer to refresh `lastPing`, and half
+                // the channel traffic vs Ping+Text (matters on a Pi with journald + many tabs).
                 if sender
-                    .send(Message::Ping(Bytes::from(format!("{}", key))))
+                    .send(Message::Text("{ \"t\": \"ping\"}".into()))
                     .is_err()
-                    || sender
-                        .send(Message::Text("{ \"t\": \"ping\"}".into()))
-                        .is_err()
                 {
                     println!("Removing dead peer: {}", key);
                     false
@@ -185,11 +199,10 @@ pub async fn start_server() {
                     true
                 }
             });
-            println!("-- CONNECTED PEERS --\n");
-            for (key, _) in peers.lock().unwrap().iter() {
-                println!("{}", key)
+            println!("-- CONNECTED PEERS ({}) --", locked.len());
+            for (key, _) in locked.iter() {
+                println!("  {}", key);
             }
-            println!("\n---------------------");
         }
     });
 
@@ -199,5 +212,7 @@ pub async fn start_server() {
 
     // This future never returns unless the server errors
     let listener = TcpListener::bind(addr).await.unwrap();
+    // One capture pipeline + signaling client for the whole process (not per browser page).
+    tokio::spawn(connect_camera_to_ws());
     axum::serve(listener, app).await.unwrap();
 }

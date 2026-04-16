@@ -28,6 +28,8 @@ pub enum SignalMessage {
     },
     Candidate {
         candidate: String,
+        sdp_mid: Option<String>, // Add this field
+        sdp_mline_index: Option<u16>,
         from: String,
         to: String,
     },

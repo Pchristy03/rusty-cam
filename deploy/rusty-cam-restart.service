@@ -1,0 +1,9 @@
+# Oneshot helper: systemd will not re-start an already-active unit when a path
+# changes, so the path unit triggers this instead.
+
+[Unit]
+Description=Restart rusty-cam after binary was replaced
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemctl restart rusty-cam.service

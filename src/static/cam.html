@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
   <head>
     <title>Baby Monitor</title>
@@ -8,54 +8,58 @@
       integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T"
       crossorigin="anonymous"
     />
+    <link rel="icon" href="data:," />
+    <style>
+      #connect-to-camera:disabled {
+        cursor: wait;
+        opacity: 0.92;
+      }
+      #connect-to-camera .connect-btn-inner {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.85rem;
+      }
+      #connect-to-camera .connect-spinner {
+        width: 2rem;
+        height: 2rem;
+        border: 0.2rem solid rgba(255, 255, 255, 0.35);
+        border-top-color: #fff;
+        border-radius: 50%;
+        animation: connect-spin 0.7s linear infinite;
+        flex-shrink: 0;
+      }
+      @keyframes connect-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+    </style>
   </head>
   <body>
-    <div style="width: 100vw; height: 100vh; background-color: #f8f9fa">
+    <div style="width: 100vw; height: 100vh; background-color: #959595">
       <div
         class="d-flex flex-column justify-content-start align-items-center h-100 py-3"
         style="gap: 1rem"
       >
-        <!-- Connect Button -->
-        <button
-          class="btn btn-primary"
-          id="connect-to-camera"
-          style="
-            width: 80%;
-            max-width: 400px;
-            height: 80px;
-            font-size: 1.5rem;
-            border-radius: 12px;
-          "
-        >
-          Connect to Camera
-        </button>
-
-        <!-- Client ID -->
-        <div
-          id="client-id"
-          style="font-size: 1.2rem; font-weight: 500; text-align: center"
-        ></div>
-
-        <!-- Connection Status -->
-        <div
-          id="is-alive-status"
-          style="font-size: 1.2rem; font-weight: 500; text-align: center"
-        ></div>
-
         <!-- Video -->
         <div
-          class="d-flex justify-content-center align-items-center"
-          style="width: 100%; flex-grow: 1"
+          class="d-flex justify-content-start align-items-center"
+          style="
+            width: 100%;
+            height: auto;
+            flex-direction: column;
+            margin-top: 100px;
+          "
         >
           <video
             id="remote-video"
-            autoplay
             playsinline
             controls
+            muted
             style="
-              display: none;
-              width: 100%;
-              aspect-ratio: 4 / 3;
+              width: 87%;
+              aspect-ratio: 4/ 3;
               object-fit: contain;
               border-radius: 8px;
               box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
@@ -64,89 +68,377 @@
           ></video>
           <!-- <audio id="remote-audio" autoplay playsinline></audio> -->
         </div>
+        <!-- Connect Button -->
+        <div
+          class="d-flex justify-content-start align-items-center"
+          style="
+            margin-bottom: 200px;
+            margin-top: 50px;
+            width: 100vw;
+            flex-direction: column;
+          "
+        >
+          <button
+            class="btn btn-primary"
+            id="connect-to-camera"
+            style="
+              width: 80%;
+              max-width: 400px;
+              height: 200px;
+              font-size: 1.5rem;
+              border-radius: 12px;
+            "
+          >
+            Connect to Camera
+          </button>
+          <!-- Client ID -->
+          <div
+            id="client-id"
+            style="font-size: 1.2rem; font-weight: 500; text-align: center"
+          ></div>
+
+          <!-- Connection Status -->
+
+          <div
+            style="
+              display: flex;
+              font-size: 1.2rem;
+              font-weight: 500;
+              text-align: center;
+              flex-direction: row;
+            "
+          >
+            <div
+              id="is-alive-status"
+              style="font-size: 1.2rem; font-weight: 500; text-align: center"
+            ></div>
+            <div
+              id="video-alive"
+              style="font-size: 1.2rem; font-weight: 500; text-align: center"
+            ></div>
+            <div
+              id="audio-alive"
+              style="font-size: 1.2rem; font-weight: 500; text-align: center"
+            ></div>
+          </div>
+        </div>
       </div>
     </div>
 
+    <p
+      id="server-version"
+      style="
+        position: fixed;
+        bottom: 0.4rem;
+        right: 0.6rem;
+        margin: 0;
+        font-size: 2rem;
+        color: rgba(0, 0, 0, 0.5);
+        font-family:
+          system-ui,
+          -apple-system,
+          sans-serif;
+        letter-spacing: 0.02em;
+      "
+    >
+      __RUSTY_CAM_VERSION__
+    </p>
+
     <script>
-      let ws;
-      let pc;
-      let lastPing;
+      let ws = null;
+      let pc = null;
+      let lastPing = 0;
+      let statsIntervalId = null;
+      let aliveIntervalId = null;
+      let connectWatchdogId = null;
+      let hasAudio = false;
+      let hasVideo = false;
+      let previous_audio = 0;
+      let previous_video = 0;
       let combinedTrack = new MediaStream();
-      const localId = "client_peer_" + Math.random().toString(36).slice(2, 10);
+      // Full page refresh in the *same tab* should reuse the same signaling id (not a new tab).
+      const VIEWER_ID_KEY = "rusty_cam_viewer_id";
+      const localId = (() => {
+        try {
+          let id = sessionStorage.getItem(VIEWER_ID_KEY);
+          if (!id) {
+            id = "client_peer_" + Math.random().toString(36).slice(2, 10);
+            sessionStorage.setItem(VIEWER_ID_KEY, id);
+          }
+          return id;
+        } catch (_) {
+          return "client_peer_" + Math.random().toString(36).slice(2, 10);
+        }
+      })();
 
       const remoteId = "camera_peer";
       const connectToCameraBtn = document.getElementById("connect-to-camera");
       const clientIdDiv = document.getElementById("client-id");
       const isAliveDiv = document.getElementById("is-alive-status");
 
+      const videoAlive = document.getElementById("video-alive");
+      const audioAlive = document.getElementById("audio-alive");
+
+      let connectSessionActive = false;
+      let connectSucceeded = false;
+
+      function clearViewerTimers() {
+        if (statsIntervalId !== null) {
+          clearInterval(statsIntervalId);
+          statsIntervalId = null;
+        }
+        if (aliveIntervalId !== null) {
+          clearInterval(aliveIntervalId);
+          aliveIntervalId = null;
+        }
+      }
+
+      /** Wait for a socket to finish closing so the next `new WebSocket()` does not race the old one's teardown. */
+      function waitWebSocketClosed(socket, timeoutMs) {
+        if (!socket) return Promise.resolve();
+        const st = socket.readyState;
+        if (st === WebSocket.CLOSED || st === WebSocket.CLOSING) {
+          return Promise.resolve();
+        }
+        return new Promise((resolve) => {
+          const done = () => {
+            clearTimeout(tid);
+            socket.removeEventListener("close", onClose);
+            resolve();
+          };
+          const onClose = () => done();
+          const tid = setTimeout(done, timeoutMs);
+          socket.addEventListener("close", onClose, { once: true });
+          try {
+            socket.close();
+          } catch (_) {
+            done();
+          }
+        });
+      }
+
+      /** Close WS/PC, stop timers, reset media. Call before a new connect or after a failed one. */
+      async function tearDownViewerSession() {
+        clearViewerTimers();
+        if (connectWatchdogId !== null) {
+          clearTimeout(connectWatchdogId);
+          connectWatchdogId = null;
+        }
+        const oldWs = ws;
+        const oldPc = pc;
+        ws = null;
+        pc = null;
+        try {
+          if (oldPc) oldPc.close();
+        } catch (_) {}
+        combinedTrack = new MediaStream();
+        previous_video = -1;
+        previous_audio = -1;
+        previous_video_packets = -1;
+        previous_audio_packets = -1;
+        videoStallTicks = 0;
+        audioStallTicks = 0;
+        const videoEl = document.getElementById("remote-video");
+        if (videoEl) {
+          videoEl.srcObject = null;
+        }
+        await waitWebSocketClosed(oldWs, 3000);
+      }
+
+      /** First inbound video track means we can show the stream (audio may follow or be absent). */
+      function tryMarkViewerConnected() {
+        if (connectSucceeded) return;
+        const videoEl = document.getElementById("remote-video");
+        if (!videoEl) return;
+        if (combinedTrack.getVideoTracks().length < 1) return;
+        connectSucceeded = true;
+        connectSessionActive = false;
+        if (connectWatchdogId !== null) {
+          clearTimeout(connectWatchdogId);
+          connectWatchdogId = null;
+        }
+        videoEl.srcObject = combinedTrack;
+        setConnectButtonConnected();
+        videoEl.play().catch((error) => {
+          if (isAliveDiv) {
+            isAliveDiv.textContent = `"Autoplay Error: ", ${error}`;
+          }
+        });
+        videoEl.style.display = "";
+      }
+
+      function setConnectButtonIdle() {
+        if (!connectToCameraBtn) return;
+        connectToCameraBtn.disabled = false;
+        connectToCameraBtn.classList.remove("btn-success");
+        connectToCameraBtn.classList.add("btn-primary");
+        connectToCameraBtn.innerHTML = "Connect to Camera";
+      }
+
+      function setConnectButtonLoading() {
+        if (!connectToCameraBtn) return;
+        connectToCameraBtn.disabled = true;
+        connectToCameraBtn.classList.remove("btn-success");
+        connectToCameraBtn.classList.add("btn-primary");
+        connectToCameraBtn.innerHTML =
+          '<span class="connect-btn-inner" aria-live="polite">' +
+          '<span class="connect-spinner" role="status" aria-label="Loading"></span>' +
+          "<span>Connecting…</span></span>";
+      }
+
+      function setConnectButtonConnected() {
+        if (!connectToCameraBtn) return;
+        connectToCameraBtn.disabled = true;
+        connectToCameraBtn.classList.remove("btn-primary");
+        connectToCameraBtn.classList.add("btn-success");
+        connectToCameraBtn.textContent = "Connected";
+      }
+
+      function resetConnectFlowOnFailure() {
+        connectSessionActive = false;
+        if (!connectSucceeded) {
+          void (async () => {
+            await tearDownViewerSession();
+            setConnectButtonIdle();
+          })();
+        }
+      }
+
       if (connectToCameraBtn) {
         connectToCameraBtn.onclick = async function () {
-          await connectToCamera();
+          if (connectSessionActive) return;
+          try {
+            await connectToCamera();
+          } catch (err) {
+            console.error(err);
+            resetConnectFlowOnFailure();
+          }
         };
       }
 
-      async function connectToCamera() {
-        const pendingCandidates = [];
+      function signalingWebSocketUrl() {
+        const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+        return `${proto}//${window.location.host}/ws`;
+      }
 
-        ws = new WebSocket("ws://192.168.1.249:3000/ws");
+      async function connectToCamera() {
+        await tearDownViewerSession();
+        connectSessionActive = true;
+        connectSucceeded = false;
+        lastPing = Date.now();
+        setConnectButtonLoading();
+
+        const pendingCandidates = [];
+        ws = new WebSocket(signalingWebSocketUrl());
+
+        const sessionWs = ws;
+        ws.addEventListener("error", (ev) => {
+          if (ev.target !== sessionWs || sessionWs !== ws) return;
+          console.error("WebSocket error");
+          resetConnectFlowOnFailure();
+        });
+
+        ws.addEventListener("close", (ev) => {
+          // Old socket's `close` can fire after we've replaced `ws`; don't kill the new session.
+          if (ev.target !== sessionWs || sessionWs !== ws) return;
+          if (!connectSucceeded) {
+            resetConnectFlowOnFailure();
+          }
+        });
 
         pc = new RTCPeerConnection();
+
+        const sessionPc = pc;
+        pc.addEventListener("connectionstatechange", () => {
+          if (
+            connectSucceeded ||
+            !connectSessionActive ||
+            connectToCameraBtn?.classList.contains("btn-success")
+          ) {
+            return;
+          }
+          if (!sessionPc || sessionPc !== pc) return;
+          const s = sessionPc.connectionState;
+          if (s === "failed" || s === "closed") {
+            console.warn("PeerConnection", s);
+            resetConnectFlowOnFailure();
+          }
+        });
         pc.addTransceiver("video", { direction: "recvonly" });
         pc.addTransceiver("audio", { direction: "recvonly" });
 
-        setInterval(async () => {
-          const stats = await pc.getStats();
-          stats.forEach((report) => {
-            if (report.type === "inbound-rtp" && report.kind === "audio") {
-              console.log(
-                `Audio received: packets=${report.packetsReceived}, bytes=${report.bytesReceived}`
-              );
-            }
-          });
-        }, 1000);
-
-        pc.ontrack = async (event) => {
-          const videoEl = document.getElementById("remote-video");
-          if (event.track.kind === "video") {
-            // Log stream info
-            console.log(typeof event.streams[0]);
-            combinedTrack.addTrack(event.streams[0].getTracks()[0]);
+        statsIntervalId = window.setInterval(async () => {
+          if (!pc || pc.connectionState === "closed") return;
+          if (document.visibilityState === "hidden") return;
+          try {
+            const stats = await pc.getStats();
+            stats.forEach((report) => {
+              if (report.type === "inbound-rtp" && report.kind === "video") {
+                if (previous_video != report.bytesReceived) {
+                  previous_video = report.bytesReceived;
+                  hasVideo = true;
+                  videoAlive.textContent = "Video: ✅";
+                } else {
+                  hasVideo = false;
+                  videoAlive.textContent = "Video: ❌";
+                }
+              }
+              if (report.type === "inbound-rtp" && report.kind === "audio") {
+                if (previous_audio != report.bytesReceived) {
+                  previous_audio = report.bytesReceived;
+                  hasAudio = true;
+                  audioAlive.textContent = "Audio: ✅";
+                } else {
+                  hasAudio = false;
+                  audioAlive.textContent = "Audio: ❌";
+                }
+              }
+            });
+          } catch (_) {
+            /* pc may be closing */
           }
+        }, 4000);
 
-          if (event.track.kind === "audio") {
-            console.log(typeof event.streams[0].getTracks()[0]);
-            combinedTrack.addTrack(event.streams[0].getTracks()[0]);
+        pc.ontrack = (event) => {
+          const t = event.track;
+          if (t.kind !== "video" && t.kind !== "audio") return;
+          // Recv-only remotes often have `event.streams` empty; always use `event.track`.
+          if (combinedTrack.getTracks().some((x) => x.id === t.id)) return;
+          try {
+            combinedTrack.addTrack(t);
+          } catch (e) {
+            console.warn("addTrack", e);
+            return;
           }
-
-          if (combinedTrack.getTracks().length == 2) {
-            videoEl.srcObject = combinedTrack;
-            try {
-              await videoEl.play();
-              videoEl.style.display = "";
-              console.log("Video and Audio play() succeeded");
-            } catch (error) {
-              console.error("Video and Audio play() failed:", error);
-            }
+          if (t.kind === "video") {
+            console.log("[WebRTC] inbound video track");
+          } else {
+            console.log("[WebRTC] inbound audio track");
           }
+          tryMarkViewerConnected();
         };
 
         // ICE candidates: send them to Rust signaling server
         pc.onicecandidate = (event) => {
-          if (event.candidate) {
+          if (!event.candidate || !ws || ws.readyState !== WebSocket.OPEN)
+            return;
+          try {
             ws.send(
               JSON.stringify({
                 candidate: event.candidate.candidate,
                 from: localId,
                 to: remoteId,
-              })
+              }),
             );
+          } catch (e) {
+            console.warn("ICE send skipped", e);
           }
         };
 
-        setInterval(() => {
+        aliveIntervalId = window.setInterval(() => {
+          if (!ws || ws.readyState !== WebSocket.OPEN) return;
           const now = Date.now();
-          if (now - lastPing > 6000) {
-            // 6 seconds threshold
+          if (lastPing > 0 && now - lastPing > 6000) {
             if (isAliveDiv) {
               isAliveDiv.textContent = "Connection Lost ⚠️";
             }
@@ -154,58 +446,102 @@
         }, 1000);
 
         ws.onmessage = async (event) => {
-          const msg = JSON.parse(event.data);
-          if (msg.answer_to) {
-            console.log("Received answer SDP");
-            const remoteDesc = new RTCSessionDescription({
-              type: "answer",
-              sdp: msg.sdp,
-            });
+          lastPing = Date.now();
+          let msg;
+          try {
+            msg = JSON.parse(event.data);
+          } catch (err) {
+            console.error("Invalid signaling message", err);
+            return;
+          }
 
-            if (clientIdDiv) {
-              clientIdDiv.textContent = `ClientId: ${msg.answer_to}`;
-            }
-            await pc.setRemoteDescription(remoteDesc);
-            console.log("Remote description set");
+          const answerTo = msg.answer_to ?? msg.answerTo;
+          if (typeof msg.sdp === "string" && answerTo) {
+            try {
+              console.log(
+                "[WebRTC] Received answer, setting remote description",
+              );
+              const remoteDesc = new RTCSessionDescription({
+                type: "answer",
+                sdp: msg.sdp,
+              });
 
-            // flush queued ICE candidates
-            for (const c of pendingCandidates) {
-              try {
-                await pc.addIceCandidate(c);
-              } catch (err) {
-                console.error("Failed to add queued ICE candidate", err);
+              if (clientIdDiv) {
+                clientIdDiv.textContent = `ClientId: ${answerTo}`;
               }
+              await pc.setRemoteDescription(remoteDesc);
+              console.log("Remote description set");
+
+              for (const c of pendingCandidates) {
+                try {
+                  await pc.addIceCandidate(c);
+                } catch (err) {
+                  console.error("Failed to add queued ICE candidate", err);
+                }
+              }
+            } catch (err) {
+              console.error(err);
+              try {
+                ws.close();
+              } catch (_) {
+                /* ignore */
+              }
+              resetConnectFlowOnFailure();
             }
-          } else if (msg.candidate) {
-            const candidate = { candidate: msg.candidate };
+            return;
+          }
+
+          if (!msg.candidate) return;
+
+          const candidate = {
+            candidate: msg.candidate,
+            sdpMid: msg.sdp_mid,
+            sdpMLineIndex: msg.sdp_mline_index,
+          };
+          try {
             if (pc.remoteDescription) {
-              // safe to add right away
               await pc.addIceCandidate(candidate);
             } else {
-              // queue until remote desc is ready
               pendingCandidates.push(candidate);
             }
-          } else if (msg.t && msg.t === "ping") {
-            if (isAliveDiv) {
-              lastPing = Date.now();
-              isAliveDiv.textContent = "Connection Stable ✅";
-            }
+          } catch (err) {
+            console.error("addIceCandidate", err);
           }
         };
 
         ws.onopen = async () => {
-          console.log("WebSocket connected, sending offer");
-          // Create an offer and send it
-          const offer = await pc.createOffer({ offerToReceiveVideo: true });
-          await pc.setLocalDescription(offer);
-          ws.send(
-            JSON.stringify({
-              sdp: offer.sdp,
-              from: localId,
-              offer_to: remoteId,
-            })
-          );
+          lastPing = Date.now();
+          try {
+            console.log("WebSocket connected, sending offer");
+            const offer = await pc.createOffer({ offerToReceiveVideo: true });
+            await pc.setLocalDescription(offer);
+            ws.send(
+              JSON.stringify({
+                sdp: offer.sdp,
+                from: localId,
+                offer_to: remoteId,
+              }),
+            );
+          } catch (err) {
+            console.error(err);
+            try {
+              ws.close();
+            } catch (_) {
+              /* ignore */
+            }
+            resetConnectFlowOnFailure();
+          }
         };
+
+        connectWatchdogId = setTimeout(() => {
+          connectWatchdogId = null;
+          if (connectSucceeded) return;
+          if (!connectSessionActive) return;
+          console.error(
+            "[WebRTC] timed out waiting for answer/media (check camera_peer + signaling)",
+          );
+          resetConnectFlowOnFailure();
+        }, 45000);
       }
     </script>
   </body>
