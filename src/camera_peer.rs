@@ -10,7 +10,6 @@ use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use webrtc::api::APIBuilder;
 use webrtc::api::media_engine::MediaEngine;
-use webrtc::ice_transport::ice_candidate::{RTCIceCandidate, RTCIceCandidateInit};
 use webrtc::media::Sample;
 use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
 use webrtc::rtp_transceiver::rtp_codec::{
@@ -59,14 +58,15 @@ pub async fn connect_camera_to_ws() {
         "rustwebrtc_audio".to_string(),
     ));
 
-    start_video_track(video_track.clone()).await.unwrap();
-    start_audio_track(audio_track.clone()).await.unwrap();
-
     println!("[WS] Connected to signaling server");
 
     let (write, mut read) = ws_stream.split();
     let write = Arc::new(Mutex::new(write));
 
+    // Register before starting GStreamer so the peer is ready for offers
+    // immediately. GStreamer init can take 200-500ms; a browser that connects
+    // quickly would otherwise send an offer before camera_peer is in the map,
+    // causing the signaling server to silently drop it.
     let register = SignalMessage::Register {
         from: "camera_peer".to_string(),
     };
@@ -77,6 +77,9 @@ pub async fn connect_camera_to_ws() {
     } else {
         println!("[WS] Registered camera_peer with server");
     }
+
+    start_video_track(video_track.clone()).await.unwrap();
+    start_audio_track(audio_track.clone()).await.unwrap();
 
     tokio::spawn(async move {
         /// How many browser tabs may receive the shared camera tracks at once.
@@ -184,6 +187,7 @@ pub async fn connect_camera_to_ws() {
                                     let pcs_order = pcs_order.clone();
                                     let from_state = from_state.clone();
                                     Box::pin(async move {
+                                        println!("[WebRTC] {} connectionState → {s}", from_state);
                                         if matches!(
                                             s,
                                             RTCPeerConnectionState::Closed
@@ -224,57 +228,31 @@ pub async fn connect_camera_to_ws() {
                             pc.set_remote_description(remote_offer).await.unwrap();
                             println!("[WebRTC] Remote description set");
 
-                            let write_clone = write.clone();
-                            let from_clone = from.clone();
-                            pc.on_ice_candidate(Box::new(move |c: Option<RTCIceCandidate>| {
-                                let write_clone = write_clone.clone();
-                                let from_clone = from_clone.clone();
-                                Box::pin(async move {
-                                    if let Some(candidate) = c {
-                                        println!("[ICE] Sending candidate to {}", from_clone);
+                            // Gather all ICE candidates before sending the answer so they
+                            // are embedded in the SDP. This avoids the trickle-ICE race
+                            // where the browser sends its candidates before the camera has
+                            // created a peer connection to receive them.
+                            let mut gather_complete = pc.gathering_complete_promise().await;
 
-                                        let candidate_json: Result<
-                                            RTCIceCandidateInit,
-                                            webrtc::Error,
-                                        > = candidate.to_json();
-                                        if let Ok(init) = candidate_json {
-                                            let msg = SignalMessage::Candidate {
-                                                candidate: init.candidate,
-                                                sdp_mid: init.sdp_mid,
-                                                sdp_mline_index: init.sdp_mline_index,
-                                                from: "camera_peer".to_string(),
-                                                to: from_clone.to_string(),
-                                            };
-                                            let json = serde_json::to_string(&msg).unwrap();
-
-                                            if let Err(e) = write_clone
-                                                .lock()
-                                                .await
-                                                .send(Message::Text(json.into()))
-                                                .await
-                                            {
-                                                eprintln!(
-                                                    "[ICE] Failed to send candidate: {:?}",
-                                                    e
-                                                );
-                                            }
-                                        }
-                                    }
-                                })
-                            }));
-
-                            // let transceivers = pc.get_transceivers().await;
-                            // for transceiver in transceivers {
-                            //     transceiver.set_direction(webrtc::rtp_transceiver::rtp_transceiver_direction::RTCRtpTransceiverDirection::Sendonly).await;
-                            // }
-
-                            // Heres what THIS server can do.
                             let answer = pc.create_answer(None).await.unwrap();
                             pc.set_local_description(answer.clone()).await.unwrap();
-                            println!("[WebRTC] Local description (answer) set");
+                            println!("[WebRTC] Local description set, waiting for ICE gathering…");
+
+                            let _ = tokio::time::timeout(
+                                Duration::from_secs(5),
+                                gather_complete.recv(),
+                            )
+                            .await;
+                            println!("[WebRTC] ICE gathering complete");
+
+                            let final_sdp = pc
+                                .local_description()
+                                .await
+                                .map(|d| d.sdp)
+                                .unwrap_or(answer.sdp);
 
                             let sdp_answer = SignalMessage::Answer {
-                                sdp: answer.sdp,
+                                sdp: final_sdp,
                                 from: "camera_peer".to_string(),
                                 answer_to: from.to_string(),
                             };
@@ -286,32 +264,6 @@ pub async fn connect_camera_to_ws() {
                                 println!("[WS] Answer sent to {}", from);
                             }
                         }
-                        SignalMessage::Candidate {
-                            candidate, from, ..
-                        } => {
-                            println!("[ICE] Received ICE candidate from {}", from);
-
-                            // Find the correct peer connection for this candidate
-                            if let Some(pc) = peer_connections.lock().await.get(&from) {
-                                let rtc_cand = RTCIceCandidateInit {
-                                    candidate,
-                                    sdp_mid: None,
-                                    sdp_mline_index: None,
-                                    username_fragment: None,
-                                };
-                                if let Err(e) = pc.add_ice_candidate(rtc_cand).await {
-                                    eprintln!(
-                                        "[ICE] Failed to add candidate for {}: {:?}",
-                                        from, e
-                                    );
-                                } else {
-                                    println!("[ICE] Candidate added successfully for {}", from);
-                                }
-                            } else {
-                                println!("[ICE] No peer connection found for {}", from);
-                            }
-                        }
-
                         _ => {}
                     }
                 }
@@ -386,9 +338,10 @@ pub async fn start_video_track(video_track: Arc<TrackLocalStaticSample>) -> anyh
     // width/height/framerate directly off v4l2src often causes pull_sample failures on Pi UVC.
     let video_pipeline = gst::parse::launch(&format!(
         "{program_and_device} ! \
-         videoconvert ! videoscale ! \
-         video/x-raw,format=RGBA,width={VIDEO_WIDTH},height={VIDEO_HEIGHT} ! \
-         appsink name=raw_sink emit-signals=true sync=false max-buffers=1 drop=true",
+        videoconvert ! videoscale ! \
+        video/x-raw,format=RGBA,width={VIDEO_WIDTH},height={VIDEO_HEIGHT} ! \
+        gamma gamma=1.8 ! \
+        appsink name=raw_sink emit-signals=true sync=false max-buffers=1 drop=true",
     ))?;
 
     let vpipeline = video_pipeline.dynamic_cast::<gst::Pipeline>().unwrap();
@@ -447,17 +400,13 @@ pub async fn start_video_track(video_track: Arc<TrackLocalStaticSample>) -> anyh
     let video_track_async = video_track.clone();
     tokio::spawn(async move {
         while let Some(data) = rx.recv().await {
-            if video_track_async
+            let _ = video_track_async
                 .write_sample(&Sample {
                     data,
                     duration: Duration::from_millis(33),
                     ..Default::default()
                 })
-                .await
-                .is_err()
-            {
-                break;
-            }
+                .await;
         }
     });
 
@@ -576,7 +525,9 @@ pub async fn start_audio_track(audio_track: Arc<TrackLocalStaticSample>) -> anyh
     let audio_prog = "alsasrc device=hw:2,0";
 
     let audio_pipeline = gst::parse::launch(&format!(
-        "{} ! audioconvert ! audioresample ! audio/x-raw,channels=1,rate=48000 ! queue ! opusenc ! appsink name=audio_sink",
+        "{} ! audioconvert ! audioresample ! audio/x-raw,channels=1,rate=48000 \
+         ! queue max-size-buffers=4 leaky=downstream \
+         ! opusenc ! appsink name=audio_sink sync=false max-buffers=2 drop=true",
         audio_prog
     ))?;
 
@@ -595,25 +546,44 @@ pub async fn start_audio_track(audio_track: Arc<TrackLocalStaticSample>) -> anyh
 
     apipeline.set_state(gst::State::Playing)?;
 
+    // pull_sample() blocks; keep it off the Tokio worker pool.
+    let (tx, mut rx) = mpsc::channel::<Bytes>(4);
+
     tokio::spawn(async move {
-        println!("Started Audio Thread");
+        while let Some(data) = rx.recv().await {
+            let _ = audio_track
+                .write_sample(&Sample {
+                    data,
+                    duration: Duration::from_millis(20),
+                    ..Default::default()
+                })
+                .await;
+        }
+    });
+
+    thread::spawn(move || {
+        println!("[GStreamer] Audio capture thread running");
         loop {
-            if let Ok(sample) = asink.pull_sample() {
-                if let Some(buffer) = sample.buffer() {
-                    if let Ok(map) = buffer.map_readable() {
-                        let data = map.as_slice();
-                        let _ = audio_track
-                            .write_sample(&Sample {
-                                data: data.to_vec().into(),
-                                duration: Duration::from_millis(20),
-                                ..Default::default()
-                            })
-                            .await;
+            match asink.pull_sample() {
+                Ok(sample) => {
+                    if let Some(buffer) = sample.buffer() {
+                        if let Ok(map) = buffer.map_readable() {
+                            if tx
+                                .blocking_send(Bytes::copy_from_slice(map.as_slice()))
+                                .is_err()
+                            {
+                                break;
+                            }
+                        }
                     }
                 }
+                Err(e) => {
+                    eprintln!("[GStreamer] audio appsink pull_sample: {e:?}");
+                    thread::sleep(Duration::from_millis(100));
+                }
             }
-            tokio::time::sleep(Duration::from_millis(10)).await;
         }
+        let _ = apipeline.set_state(gst::State::Null);
     });
 
     Ok(())

@@ -1,547 +1,806 @@
 <!doctype html>
-<html>
+<html lang="en">
   <head>
-    <title>Baby Monitor</title>
-    <link
-      rel="stylesheet"
-      href="https://cdn.jsdelivr.net/npm/bootstrap@4.3.1/dist/css/bootstrap.min.css"
-      integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T"
-      crossorigin="anonymous"
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
     />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta
+      name="apple-mobile-web-app-status-bar-style"
+      content="black-translucent"
+    />
+    <title>Baby Monitor</title>
     <link rel="icon" href="data:," />
     <style>
-      #connect-to-camera:disabled {
-        cursor: wait;
-        opacity: 0.92;
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
       }
-      #connect-to-camera .connect-btn-inner {
-        display: inline-flex;
+
+      :root {
+        --bg: #0d0f12;
+        --surface: #161a20;
+        --border: rgba(255, 255, 255, 0.07);
+        --text: #e8e4dc;
+        --muted: rgba(232, 228, 220, 0.4);
+        --accent: #c9a96e;
+        --green: #6dbf8f;
+        --red: #e07070;
+        --safe-top: env(safe-area-inset-top, 0px);
+        --safe-bot: env(safe-area-inset-bottom, 0px);
+      }
+
+      html,
+      body {
+        height: 100%;
+        width: 100%;
+        background: var(--bg);
+        color: var(--text);
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial,
+          sans-serif;
+        -webkit-font-smoothing: antialiased;
+        overflow: hidden;
+      }
+
+      .app {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        padding-top: var(--safe-top);
+        padding-bottom: var(--safe-bot);
+      }
+
+      /* Header */
+      .header {
+        display: flex;
         align-items: center;
-        justify-content: center;
-        gap: 0.85rem;
-      }
-      #connect-to-camera .connect-spinner {
-        width: 2rem;
-        height: 2rem;
-        border: 0.2rem solid rgba(255, 255, 255, 0.35);
-        border-top-color: #fff;
-        border-radius: 50%;
-        animation: connect-spin 0.7s linear infinite;
+        justify-content: space-between;
+        padding: 18px 24px 12px;
         flex-shrink: 0;
       }
-      @keyframes connect-spin {
-        to {
-          transform: rotate(360deg);
+      .header-title {
+        font-size: 12px;
+        font-weight: 500;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .live-badge {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 11px;
+        font-family: ui-monospace, "SF Mono", "Cascadia Code", monospace;
+        color: var(--muted);
+        letter-spacing: 0.06em;
+      }
+      .dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--muted);
+        opacity: 0.35;
+        transition:
+          background 0.4s,
+          opacity 0.4s,
+          box-shadow 0.4s;
+        flex-shrink: 0;
+      }
+      .dot.live {
+        background: var(--green);
+        opacity: 1;
+        animation: pulse 2.4s ease-in-out infinite;
+      }
+      .dot.error {
+        background: var(--red);
+        opacity: 1;
+      }
+      @keyframes pulse {
+        0%,
+        100% {
+          box-shadow: 0 0 0 0 rgba(109, 191, 143, 0.45);
         }
+        50% {
+          box-shadow: 0 0 0 5px rgba(109, 191, 143, 0);
+        }
+      }
+
+      /* Video */
+      .video-wrap {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: end;
+        padding: 16px;
+        min-height: 0;
+      }
+      .video-frame {
+        position: relative;
+        width: 100%;
+        aspect-ratio: 4/3;
+        max-height: 100%;
+        border-radius: 18px;
+        overflow: hidden;
+        background: var(--surface);
+        border: 1px solid var(--border);
+      }
+      .video-frame video {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        display: block;
+      }
+      .video-placeholder {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 14px;
+        pointer-events: none;
+        transition: opacity 0.5s;
+      }
+      .video-placeholder.hidden {
+        opacity: 0;
+      }
+      .placeholder-icon {
+        opacity: 0.15;
+      }
+      .placeholder-text {
+        font-size: 13px;
+        color: var(--muted);
+        letter-spacing: 0.05em;
+      }
+
+      /* Tap-to-play overlay — shown when stream is ready but autoplay blocked */
+      .tap-overlay {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        background: rgba(13, 15, 18, 0.55);
+        cursor: pointer;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.3s;
+        border-radius: 18px;
+        -webkit-tap-highlight-color: transparent;
+      }
+      .tap-overlay.visible {
+        opacity: 1;
+        pointer-events: all;
+      }
+      .tap-overlay svg {
+        opacity: 0.9;
+      }
+      .tap-overlay span {
+        font-size: 13px;
+        color: var(--text);
+        letter-spacing: 0.08em;
+        font-family: ui-monospace, "SF Mono", "Cascadia Code", monospace;
+      }
+
+      /* Stats */
+      .stats {
+        display: flex;
+        justify-content: center;
+        gap: 24px;
+        padding: 10px 24px 2px;
+        flex-shrink: 0;
+      }
+      .stat {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        font-size: 11px;
+        font-family: ui-monospace, "SF Mono", "Cascadia Code", monospace;
+        color: var(--muted);
+        letter-spacing: 0.05em;
+        transition: color 0.3s;
+      }
+      .stat-dot {
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: currentColor;
+        opacity: 0.35;
+        transition: opacity 0.3s;
+      }
+      .stat.ok {
+        color: var(--green);
+      }
+      .stat.ok .stat-dot {
+        opacity: 1;
+      }
+      .stat.bad {
+        color: var(--red);
+      }
+      .stat.bad .stat-dot {
+        opacity: 1;
+      }
+
+      /* Footer */
+      .footer {
+        padding: 14px 20px 18px;
+        flex-shrink: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        margin-bottom: 200px;
+        gap: 10px;
+      }
+      .status-msg {
+        font-size: 11px;
+        color: var(--muted);
+        font-family: ui-monospace, "SF Mono", "Cascadia Code", monospace;
+        letter-spacing: 0.04em;
+        min-height: 15px;
+        text-align: center;
+      }
+      .status-msg.warn {
+        color: var(--red);
+      }
+
+      .version {
+        position: fixed;
+        bottom: calc(var(--safe-bot) + 40px);
+        right: 12px;
+        font-size: 25px;
+        font-family: ui-monospace, "SF Mono", "Cascadia Code", monospace;
+        color: rgba(255, 255, 255, 0.527);
+        pointer-events: none;
+        letter-spacing: 0.04em;
       }
     </style>
   </head>
   <body>
-    <div style="width: 100vw; height: 100vh; background-color: #959595">
-      <div
-        class="d-flex flex-column justify-content-start align-items-center h-100 py-3"
-        style="gap: 1rem"
-      >
-        <!-- Video -->
-        <div
-          class="d-flex justify-content-start align-items-center"
-          style="
-            width: 100%;
-            height: auto;
-            flex-direction: column;
-            margin-top: 100px;
-          "
-        >
+    <div class="app">
+      <header class="header">
+        <span class="header-title">Baby Monitor</span>
+        <span class="live-badge">
+          <span class="dot" id="live-dot"></span>
+          <span id="live-label">connecting…</span>
+        </span>
+      </header>
+
+      <div class="video-wrap">
+        <div class="video-frame">
           <video
-            id="remote-video"
+            id="video"
             playsinline
-            controls
             muted
-            style="
-              width: 87%;
-              aspect-ratio: 4/ 3;
-              object-fit: contain;
-              border-radius: 8px;
-              box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-              background-color: black;
-            "
+            webkit-playsinline
+            controls
           ></video>
-          <!-- <audio id="remote-audio" autoplay playsinline></audio> -->
-        </div>
-        <!-- Connect Button -->
-        <div
-          class="d-flex justify-content-start align-items-center"
-          style="
-            margin-bottom: 200px;
-            margin-top: 50px;
-            width: 100vw;
-            flex-direction: column;
-          "
-        >
-          <button
-            class="btn btn-primary"
-            id="connect-to-camera"
-            style="
-              width: 80%;
-              max-width: 400px;
-              height: 200px;
-              font-size: 1.5rem;
-              border-radius: 12px;
-            "
-          >
-            Connect to Camera
-          </button>
-          <!-- Client ID -->
-          <div
-            id="client-id"
-            style="font-size: 1.2rem; font-weight: 500; text-align: center"
-          ></div>
-
-          <!-- Connection Status -->
-
-          <div
-            style="
-              display: flex;
-              font-size: 1.2rem;
-              font-weight: 500;
-              text-align: center;
-              flex-direction: row;
-            "
-          >
-            <div
-              id="is-alive-status"
-              style="font-size: 1.2rem; font-weight: 500; text-align: center"
-            ></div>
-            <div
-              id="video-alive"
-              style="font-size: 1.2rem; font-weight: 500; text-align: center"
-            ></div>
-            <div
-              id="audio-alive"
-              style="font-size: 1.2rem; font-weight: 500; text-align: center"
-            ></div>
+          <div class="video-placeholder" id="placeholder">
+            <svg
+              class="placeholder-icon"
+              width="48"
+              height="48"
+              viewBox="0 0 48 48"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <rect
+                x="2"
+                y="9"
+                width="44"
+                height="32"
+                rx="5"
+                stroke="#e8e4dc"
+                stroke-width="2.2"
+              />
+              <circle
+                cx="24"
+                cy="25"
+                r="8"
+                stroke="#e8e4dc"
+                stroke-width="2.2"
+              />
+              <circle cx="24" cy="25" r="3" fill="#e8e4dc" />
+              <rect
+                x="17"
+                y="5"
+                width="14"
+                height="5"
+                rx="2.5"
+                stroke="#e8e4dc"
+                stroke-width="2"
+              />
+            </svg>
+            <span class="placeholder-text" id="placeholder-text"
+              >Connecting…</span
+            >
+          </div>
+          <!-- shown when autoplay is blocked (low power mode) -->
+          <div class="tap-overlay" id="tap-overlay">
+            <svg
+              width="52"
+              height="52"
+              viewBox="0 0 52 52"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <circle
+                cx="26"
+                cy="26"
+                r="24"
+                stroke="#e8e4dc"
+                stroke-width="2"
+              />
+              <polygon points="21,17 21,35 38,26" fill="#e8e4dc" />
+            </svg>
+            <span>Tap to play</span>
           </div>
         </div>
       </div>
-    </div>
 
-    <p
-      id="server-version"
-      style="
-        position: fixed;
-        bottom: 0.4rem;
-        right: 0.6rem;
-        margin: 0;
-        font-size: 2rem;
-        color: rgba(0, 0, 0, 0.5);
-        font-family:
-          system-ui,
-          -apple-system,
-          sans-serif;
-        letter-spacing: 0.02em;
-      "
-    >
-      __RUSTY_CAM_VERSION__
-    </p>
+      <div class="stats">
+        <span class="stat" id="stat-video"
+          ><span class="stat-dot"></span>video</span
+        >
+        <span class="stat" id="stat-audio"
+          ><span class="stat-dot"></span>audio</span
+        >
+      </div>
+
+      <footer class="footer">
+        <div class="status-msg" id="status-msg"></div>
+      </footer>
+    </div>
+    <div class="version">__RUSTY_CAM_VERSION__</div>
 
     <script>
-      let ws = null;
-      let pc = null;
+      // ── State ────────────────────────────────────────────────────────────────────
+      let ws = null,
+        pc = null;
+      let connecting = false,
+        connected = false;
       let lastPing = 0;
-      let statsIntervalId = null;
-      let aliveIntervalId = null;
-      let connectWatchdogId = null;
-      let hasAudio = false;
-      let hasVideo = false;
-      let previous_audio = 0;
-      let previous_video = 0;
-      let combinedTrack = new MediaStream();
-      // Full page refresh in the *same tab* should reuse the same signaling id (not a new tab).
+      let statsTimer = null,
+        aliveTimer = null,
+        watchdog = null,
+        retryTimer = null;
+      let prevVideoBytes = -1,
+        prevAudioBytes = -1;
+      let stream = new MediaStream();
+      let attempt = 0;
+      const MAX_RETRIES = 8;
+      const RETRY_DELAY_MS = 2000;
+      const ICE_GATHER_TIMEOUT_MS = 2000;
+      const WATCHDOG_MS = 12000; // fail fast — don't wait 30s to retry
+
       const VIEWER_ID_KEY = "rusty_cam_viewer_id";
       const localId = (() => {
         try {
-          let id = sessionStorage.getItem(VIEWER_ID_KEY);
-          if (!id) {
-            id = "client_peer_" + Math.random().toString(36).slice(2, 10);
-            sessionStorage.setItem(VIEWER_ID_KEY, id);
-          }
-          return id;
-        } catch (_) {
+          return (
+            sessionStorage.getItem(VIEWER_ID_KEY) ||
+            (() => {
+              const id =
+                "client_peer_" + Math.random().toString(36).slice(2, 10);
+              sessionStorage.setItem(VIEWER_ID_KEY, id);
+              return id;
+            })()
+          );
+        } catch {
           return "client_peer_" + Math.random().toString(36).slice(2, 10);
         }
       })();
-
       const remoteId = "camera_peer";
-      const connectToCameraBtn = document.getElementById("connect-to-camera");
-      const clientIdDiv = document.getElementById("client-id");
-      const isAliveDiv = document.getElementById("is-alive-status");
 
-      const videoAlive = document.getElementById("video-alive");
-      const audioAlive = document.getElementById("audio-alive");
+      // ── DOM refs ─────────────────────────────────────────────────────────────────
+      const video = document.getElementById("video");
+      const placeholder = document.getElementById("placeholder");
+      const placeholderText = document.getElementById("placeholder-text");
+      const liveDot = document.getElementById("live-dot");
+      const liveLabel = document.getElementById("live-label");
+      const statVideo = document.getElementById("stat-video");
+      const statAudio = document.getElementById("stat-audio");
+      const statusMsg = document.getElementById("status-msg");
+      const tapOverlay = document.getElementById("tap-overlay");
 
-      let connectSessionActive = false;
-      let connectSucceeded = false;
-
-      function clearViewerTimers() {
-        if (statsIntervalId !== null) {
-          clearInterval(statsIntervalId);
-          statsIntervalId = null;
-        }
-        if (aliveIntervalId !== null) {
-          clearInterval(aliveIntervalId);
-          aliveIntervalId = null;
-        }
+      // ── UI helpers ───────────────────────────────────────────────────────────────
+      function setLive(on) {
+        liveDot.className = "dot" + (on ? " live" : "");
+        liveLabel.textContent = on ? "live" : "offline";
+      }
+      function setStat(el, state) {
+        el.className =
+          "stat" + (state === "ok" ? " ok" : state === "bad" ? " bad" : "");
+      }
+      function setMsg(text, warn = false) {
+        statusMsg.textContent = text;
+        statusMsg.className = "status-msg" + (warn ? " warn" : "");
+      }
+      function setPlaceholder(text) {
+        placeholderText.textContent = text;
+      }
+      function showTapOverlay(show) {
+        tapOverlay.classList.toggle("visible", show);
       }
 
-      /** Wait for a socket to finish closing so the next `new WebSocket()` does not race the old one's teardown. */
-      function waitWebSocketClosed(socket, timeoutMs) {
-        if (!socket) return Promise.resolve();
-        const st = socket.readyState;
-        if (st === WebSocket.CLOSED || st === WebSocket.CLOSING) {
+      // ── WebSocket URL ────────────────────────────────────────────────────────────
+      function wsUrl() {
+        const proto = location.protocol === "https:" ? "wss:" : "ws:";
+        return `${proto}//${location.host}/ws`;
+      }
+
+      // ── Play helpers ─────────────────────────────────────────────────────────────
+      // On iOS low power mode, autoplay is always blocked — we never fight it.
+      // Instead, as soon as the stream is ready we show a tap-to-start overlay.
+      // The tap IS the user gesture iOS requires, so play() always succeeds there.
+      // On normal devices/desktop, attemptAutoplay() will just work silently.
+      function attemptAutoplay() {
+        video
+          .play()
+          .then(() => {
+            showTapOverlay(false);
+            setMsg("");
+          })
+          .catch(() => {
+            // Autoplay blocked (low power mode, browser policy) — show tap prompt
+            showTapOverlay(true);
+            setMsg("Tap to start", false);
+          });
+      }
+
+      // Tap-to-play: user gesture satisfies iOS autoplay policy
+      tapOverlay.addEventListener("click", () => {
+        showTapOverlay(false);
+        video.play().catch((e) => {
+          console.error("[video] tap play failed:", e);
+          showTapOverlay(true);
+        });
+      });
+
+      // ── Teardown ─────────────────────────────────────────────────────────────────
+      function clearTimers() {
+        [statsTimer, aliveTimer, watchdog, retryTimer].forEach(
+          (id) => id !== null && clearTimeout(id),
+        );
+        statsTimer = aliveTimer = watchdog = retryTimer = null;
+      }
+
+      function waitClosed(socket, ms = 6000) {
+        if (!socket || socket.readyState >= WebSocket.CLOSING)
           return Promise.resolve();
-        }
-        return new Promise((resolve) => {
+        return new Promise((res) => {
           const done = () => {
-            clearTimeout(tid);
-            socket.removeEventListener("close", onClose);
-            resolve();
+            clearTimeout(t);
+            socket.removeEventListener("close", done);
+            res();
           };
-          const onClose = () => done();
-          const tid = setTimeout(done, timeoutMs);
-          socket.addEventListener("close", onClose, { once: true });
+          const t = setTimeout(done, ms);
+          socket.addEventListener("close", done, { once: true });
           try {
-            socket.close();
-          } catch (_) {
+            socket.close(1000, "teardown");
+          } catch {
             done();
           }
         });
       }
 
-      /** Close WS/PC, stop timers, reset media. Call before a new connect or after a failed one. */
-      async function tearDownViewerSession() {
-        clearViewerTimers();
-        if (connectWatchdogId !== null) {
-          clearTimeout(connectWatchdogId);
-          connectWatchdogId = null;
-        }
-        const oldWs = ws;
-        const oldPc = pc;
-        ws = null;
-        pc = null;
+      async function teardown() {
+        clearTimers();
+        const [oldWs, oldPc] = [ws, pc];
+        ws = pc = null;
         try {
-          if (oldPc) oldPc.close();
-        } catch (_) {}
-        combinedTrack = new MediaStream();
-        previous_video = -1;
-        previous_audio = -1;
-        previous_video_packets = -1;
-        previous_audio_packets = -1;
-        videoStallTicks = 0;
-        audioStallTicks = 0;
-        const videoEl = document.getElementById("remote-video");
-        if (videoEl) {
-          videoEl.srcObject = null;
-        }
-        await waitWebSocketClosed(oldWs, 3000);
+          oldPc?.close();
+        } catch {}
+        stream = new MediaStream();
+        prevVideoBytes = prevAudioBytes = -1;
+        video.srcObject = null;
+        showTapOverlay(false);
+        placeholder.classList.remove("hidden");
+        setStat(statVideo, "");
+        setStat(statAudio, "");
+        setLive(false);
+        await waitClosed(oldWs);
+        console.log(
+          `[teardown] old WS readyState=${oldWs?.readyState ?? "none"}`,
+        );
       }
 
-      /** First inbound video track means we can show the stream (audio may follow or be absent). */
-      function tryMarkViewerConnected() {
-        if (connectSucceeded) return;
-        const videoEl = document.getElementById("remote-video");
-        if (!videoEl) return;
-        if (combinedTrack.getVideoTracks().length < 1) return;
-        connectSucceeded = true;
-        connectSessionActive = false;
-        if (connectWatchdogId !== null) {
-          clearTimeout(connectWatchdogId);
-          connectWatchdogId = null;
-        }
-        videoEl.srcObject = combinedTrack;
-        setConnectButtonConnected();
-        videoEl.play().catch((error) => {
-          if (isAliveDiv) {
-            isAliveDiv.textContent = `"Autoplay Error: ", ${error}`;
-          }
-        });
-        videoEl.style.display = "";
-      }
+      // ── Visibility / page lifecycle ──────────────────────────────────────────────
+      // visibilitychange: recover when the page becomes visible again
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState !== "visible") return;
 
-      function setConnectButtonIdle() {
-        if (!connectToCameraBtn) return;
-        connectToCameraBtn.disabled = false;
-        connectToCameraBtn.classList.remove("btn-success");
-        connectToCameraBtn.classList.add("btn-primary");
-        connectToCameraBtn.innerHTML = "Connect to Camera";
-      }
-
-      function setConnectButtonLoading() {
-        if (!connectToCameraBtn) return;
-        connectToCameraBtn.disabled = true;
-        connectToCameraBtn.classList.remove("btn-success");
-        connectToCameraBtn.classList.add("btn-primary");
-        connectToCameraBtn.innerHTML =
-          '<span class="connect-btn-inner" aria-live="polite">' +
-          '<span class="connect-spinner" role="status" aria-label="Loading"></span>' +
-          "<span>Connecting…</span></span>";
-      }
-
-      function setConnectButtonConnected() {
-        if (!connectToCameraBtn) return;
-        connectToCameraBtn.disabled = true;
-        connectToCameraBtn.classList.remove("btn-primary");
-        connectToCameraBtn.classList.add("btn-success");
-        connectToCameraBtn.textContent = "Connected";
-      }
-
-      function resetConnectFlowOnFailure() {
-        connectSessionActive = false;
-        if (!connectSucceeded) {
-          void (async () => {
-            await tearDownViewerSession();
-            setConnectButtonIdle();
-          })();
-        }
-      }
-
-      if (connectToCameraBtn) {
-        connectToCameraBtn.onclick = async function () {
-          if (connectSessionActive) return;
-          try {
-            await connectToCamera();
-          } catch (err) {
+        if (connecting && !connected) {
+          console.log(
+            "[visibility] became visible while stuck connecting — restarting",
+          );
+          attempt = 0;
+          connect().catch((err) => {
             console.error(err);
-            resetConnectFlowOnFailure();
-          }
-        };
-      }
+            onFailure();
+          });
+          return;
+        }
 
-      function signalingWebSocketUrl() {
-        const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-        return `${proto}//${window.location.host}/ws`;
-      }
+        if (connected) {
+          // Resume playback — low power mode may have paused it
+          attemptAutoplay();
+        }
+      });
 
-      async function connectToCamera() {
-        await tearDownViewerSession();
-        connectSessionActive = true;
-        connectSucceeded = false;
+      // pageshow fires on BFCache restore (back/forward nav on iOS).
+      // The page is "restored" but WebRTC is dead — we must reconnect.
+      window.addEventListener("pageshow", (e) => {
+        if (e.persisted) {
+          console.log("[pageshow] BFCache restore detected — reconnecting");
+          attempt = 0;
+          connected = false;
+          connect().catch((err) => {
+            console.error(err);
+            onFailure();
+          });
+        }
+      });
+
+      // ── Connection flow ──────────────────────────────────────────────────────────
+      async function connect() {
+        await teardown();
+        connecting = true;
+        connected = false;
         lastPing = Date.now();
-        setConnectButtonLoading();
+        liveLabel.textContent = "connecting…";
+        setPlaceholder("Connecting…");
+        setMsg("");
 
-        const pendingCandidates = [];
-        ws = new WebSocket(signalingWebSocketUrl());
+        ws = new WebSocket(wsUrl());
+        const _ws = ws;
 
-        const sessionWs = ws;
-        ws.addEventListener("error", (ev) => {
-          if (ev.target !== sessionWs || sessionWs !== ws) return;
-          console.error("WebSocket error");
-          resetConnectFlowOnFailure();
-        });
-
-        ws.addEventListener("close", (ev) => {
-          // Old socket's `close` can fire after we've replaced `ws`; don't kill the new session.
-          if (ev.target !== sessionWs || sessionWs !== ws) return;
-          if (!connectSucceeded) {
-            resetConnectFlowOnFailure();
-          }
-        });
+        ws.onerror = (e) => {
+          console.error("[WS] error", e);
+          if (ws === _ws) onFailure();
+        };
+        ws.onclose = (e) => {
+          console.log(
+            `[WS] closed — code=${e.code} reason="${e.reason}" wasClean=${e.wasClean}`,
+          );
+          // Always call onFailure if we haven't finished connecting —
+          // this is the main path for "stuck on connecting" on first load
+          if (ws === _ws && !connected) onFailure();
+        };
 
         pc = new RTCPeerConnection();
+        const _pc = pc;
 
-        const sessionPc = pc;
-        pc.addEventListener("connectionstatechange", () => {
-          if (
-            connectSucceeded ||
-            !connectSessionActive ||
-            connectToCameraBtn?.classList.contains("btn-success")
-          ) {
-            return;
-          }
-          if (!sessionPc || sessionPc !== pc) return;
-          const s = sessionPc.connectionState;
-          if (s === "failed" || s === "closed") {
-            console.warn("PeerConnection", s);
-            resetConnectFlowOnFailure();
-          }
-        });
+        pc.onconnectionstatechange = () => {
+          console.log(`[WebRTC] connectionState → ${_pc.connectionState}`);
+          if (connected || !connecting || pc !== _pc) return;
+          if (["failed", "closed"].includes(_pc.connectionState)) onFailure();
+        };
+
+        pc.oniceconnectionstatechange = () => {
+          console.log(`[ICE] iceConnectionState → ${_pc.iceConnectionState}`);
+        };
+
+        pc.onicegatheringstatechange = () => {
+          console.log(`[ICE] iceGatheringState → ${_pc.iceGatheringState}`);
+        };
+
+        pc.onsignalingstatechange = () => {
+          console.log(`[WebRTC] signalingState → ${_pc.signalingState}`);
+        };
+
         pc.addTransceiver("video", { direction: "recvonly" });
         pc.addTransceiver("audio", { direction: "recvonly" });
 
-        statsIntervalId = window.setInterval(async () => {
-          if (!pc || pc.connectionState === "closed") return;
-          if (document.visibilityState === "hidden") return;
+        pc.ontrack = ({ track }) => {
+          console.log(`[WebRTC] ontrack — kind=${track.kind} id=${track.id}`);
+          if (!["video", "audio"].includes(track.kind)) return;
+          if (stream.getTracks().some((t) => t.id === track.id)) return;
+          try {
+            stream.addTrack(track);
+          } catch (e) {
+            console.warn(e);
+            return;
+          }
+          if (track.kind === "video") tryMarkConnected();
+        };
+
+        // Start offer preparation now — overlaps with WebSocket TCP handshake so
+        // cold WebRTC startup (slow on first iOS load) doesn't eat into the watchdog.
+        const offerReady = (async () => {
+          const offer = await _pc.createOffer({ offerToReceiveVideo: true });
+          await _pc.setLocalDescription(offer);
+          await new Promise((resolve) => {
+            if (_pc.iceGatheringState === "complete") {
+              resolve();
+              return;
+            }
+            const timer = setTimeout(resolve, ICE_GATHER_TIMEOUT_MS);
+            const handler = () => {
+              if (_pc.iceGatheringState === "complete") {
+                clearTimeout(timer);
+                _pc.removeEventListener("icegatheringstatechange", handler);
+                resolve();
+              }
+            };
+            _pc.addEventListener("icegatheringstatechange", handler);
+          });
+        })();
+
+        statsTimer = setInterval(async () => {
+          if (!pc || pc.connectionState === "closed" || document.hidden) return;
           try {
             const stats = await pc.getStats();
-            stats.forEach((report) => {
-              if (report.type === "inbound-rtp" && report.kind === "video") {
-                if (previous_video != report.bytesReceived) {
-                  previous_video = report.bytesReceived;
-                  hasVideo = true;
-                  videoAlive.textContent = "Video: ✅";
-                } else {
-                  hasVideo = false;
-                  videoAlive.textContent = "Video: ❌";
-                }
+            stats.forEach((r) => {
+              if (r.type !== "inbound-rtp") return;
+              if (r.kind === "video") {
+                const ok = r.bytesReceived !== prevVideoBytes;
+                prevVideoBytes = r.bytesReceived;
+                setStat(statVideo, ok ? "ok" : "bad");
               }
-              if (report.type === "inbound-rtp" && report.kind === "audio") {
-                if (previous_audio != report.bytesReceived) {
-                  previous_audio = report.bytesReceived;
-                  hasAudio = true;
-                  audioAlive.textContent = "Audio: ✅";
-                } else {
-                  hasAudio = false;
-                  audioAlive.textContent = "Audio: ❌";
-                }
+              if (r.kind === "audio") {
+                const ok = r.bytesReceived !== prevAudioBytes;
+                prevAudioBytes = r.bytesReceived;
+                setStat(statAudio, ok ? "ok" : "bad");
               }
             });
-          } catch (_) {
-            /* pc may be closing */
-          }
+          } catch {}
         }, 4000);
 
-        pc.ontrack = (event) => {
-          const t = event.track;
-          if (t.kind !== "video" && t.kind !== "audio") return;
-          // Recv-only remotes often have `event.streams` empty; always use `event.track`.
-          if (combinedTrack.getTracks().some((x) => x.id === t.id)) return;
-          try {
-            combinedTrack.addTrack(t);
-          } catch (e) {
-            console.warn("addTrack", e);
-            return;
-          }
-          if (t.kind === "video") {
-            console.log("[WebRTC] inbound video track");
-          } else {
-            console.log("[WebRTC] inbound audio track");
-          }
-          tryMarkViewerConnected();
-        };
-
-        // ICE candidates: send them to Rust signaling server
-        pc.onicecandidate = (event) => {
-          if (!event.candidate || !ws || ws.readyState !== WebSocket.OPEN)
-            return;
-          try {
-            ws.send(
-              JSON.stringify({
-                candidate: event.candidate.candidate,
-                from: localId,
-                to: remoteId,
-              }),
-            );
-          } catch (e) {
-            console.warn("ICE send skipped", e);
-          }
-        };
-
-        aliveIntervalId = window.setInterval(() => {
-          if (!ws || ws.readyState !== WebSocket.OPEN) return;
-          const now = Date.now();
-          if (lastPing > 0 && now - lastPing > 6000) {
-            if (isAliveDiv) {
-              isAliveDiv.textContent = "Connection Lost ⚠️";
-            }
-          }
+        aliveTimer = setInterval(() => {
+          if (!connected) return;
+          if (ws?.readyState === WebSocket.OPEN && Date.now() - lastPing > 6000)
+            setMsg("Connection lost", true);
         }, 1000);
 
-        ws.onmessage = async (event) => {
+        ws.onmessage = async ({ data }) => {
           lastPing = Date.now();
           let msg;
           try {
-            msg = JSON.parse(event.data);
-          } catch (err) {
-            console.error("Invalid signaling message", err);
+            msg = JSON.parse(data);
+          } catch {
             return;
           }
 
-          const answerTo = msg.answer_to ?? msg.answerTo;
-          if (typeof msg.sdp === "string" && answerTo) {
+          if (typeof msg.sdp === "string" && (msg.answer_to ?? msg.answerTo)) {
+            console.log("[WebRTC] received answer, setting remote description");
             try {
-              console.log(
-                "[WebRTC] Received answer, setting remote description",
-              );
-              const remoteDesc = new RTCSessionDescription({
-                type: "answer",
-                sdp: msg.sdp,
-              });
-
-              if (clientIdDiv) {
-                clientIdDiv.textContent = `ClientId: ${answerTo}`;
-              }
-              await pc.setRemoteDescription(remoteDesc);
-              console.log("Remote description set");
-
-              for (const c of pendingCandidates) {
-                try {
-                  await pc.addIceCandidate(c);
-                } catch (err) {
-                  console.error("Failed to add queued ICE candidate", err);
-                }
-              }
+              await _pc.setRemoteDescription({ type: "answer", sdp: msg.sdp });
             } catch (err) {
-              console.error(err);
+              console.error("[WebRTC] setRemoteDescription failed:", err);
               try {
-                ws.close();
-              } catch (_) {
-                /* ignore */
-              }
-              resetConnectFlowOnFailure();
+                _ws.close();
+              } catch {}
+              onFailure();
             }
             return;
-          }
-
-          if (!msg.candidate) return;
-
-          const candidate = {
-            candidate: msg.candidate,
-            sdpMid: msg.sdp_mid,
-            sdpMLineIndex: msg.sdp_mline_index,
-          };
-          try {
-            if (pc.remoteDescription) {
-              await pc.addIceCandidate(candidate);
-            } else {
-              pendingCandidates.push(candidate);
-            }
-          } catch (err) {
-            console.error("addIceCandidate", err);
           }
         };
 
         ws.onopen = async () => {
+          console.log(
+            `[WS] connected — localId=${localId} → remoteId=${remoteId}`,
+          );
           lastPing = Date.now();
           try {
-            console.log("WebSocket connected, sending offer");
-            const offer = await pc.createOffer({ offerToReceiveVideo: true });
-            await pc.setLocalDescription(offer);
-            ws.send(
+            await offerReady;
+            console.log(
+              "[WebRTC] offer ready (gathering complete), sending to camera_peer",
+            );
+            _ws.send(
               JSON.stringify({
-                sdp: offer.sdp,
+                sdp: _pc.localDescription.sdp,
                 from: localId,
                 offer_to: remoteId,
               }),
             );
           } catch (err) {
-            console.error(err);
+            console.error("[WebRTC] failed to create/send offer:", err);
             try {
-              ws.close();
-            } catch (_) {
-              /* ignore */
-            }
-            resetConnectFlowOnFailure();
+              _ws.close();
+            } catch {}
+            onFailure();
           }
         };
 
-        connectWatchdogId = setTimeout(() => {
-          connectWatchdogId = null;
-          if (connectSucceeded) return;
-          if (!connectSessionActive) return;
+        watchdog = setTimeout(() => {
+          if (connected || !connecting) return;
           console.error(
-            "[WebRTC] timed out waiting for answer/media (check camera_peer + signaling)",
+            `[WebRTC] timed out — connectionState=${pc?.connectionState} iceConnectionState=${pc?.iceConnectionState} signalingState=${pc?.signalingState}`,
           );
-          resetConnectFlowOnFailure();
-        }, 45000);
+          onFailure();
+        }, WATCHDOG_MS);
+      }
+
+      // ── Mark connected and start video ───────────────────────────────────────────
+      // We set srcObject and immediately attempt autoplay. On low power mode iOS,
+      // autoplay will be rejected and we show the tap overlay — that tap IS the
+      // user gesture, so play() inside the tap handler always succeeds.
+      // We do NOT wait for canplay before showing the overlay; that extra gate was
+      // causing the "flashing play button" — the native video controls were briefly
+      // visible while we waited for readyState to advance.
+      function tryMarkConnected() {
+        if (connected || stream.getVideoTracks().length < 1) return;
+        connected = true;
+        connecting = false;
+        attempt = 0; // reset for next disconnect cycle
+        clearTimeout(watchdog);
+        watchdog = null;
+
+        video.srcObject = stream;
+        placeholder.classList.add("hidden");
+        setLive(true);
+        setMsg("");
+
+        // Try autoplay; if rejected, tap overlay takes over
+        attemptAutoplay();
+      }
+
+      function onFailure() {
+        const wasConnected = connected;
+        connecting = false;
+        connected = false;
+
+        void teardown().then(() => {
+          // If we were fully connected and stable, don't auto-retry — let the
+          // aliveTimer / visibilitychange handler deal with reconnects.
+          // But if we never finished connecting (first load stall, offer timeout,
+          // WS close before answer), always retry up to MAX_RETRIES.
+          if (wasConnected) return;
+
+          if (attempt < MAX_RETRIES) {
+            attempt++;
+            const delay = Math.min(RETRY_DELAY_MS * attempt, 10000);
+            liveLabel.textContent = "retrying…";
+            setPlaceholder(`Retrying… (${attempt}/${MAX_RETRIES})`);
+            setMsg(`Attempt ${attempt} of ${MAX_RETRIES}`);
+            console.log(
+              `[retry] attempt ${attempt}/${MAX_RETRIES} in ${delay}ms`,
+            );
+            retryTimer = setTimeout(async () => {
+              try {
+                await connect();
+              } catch (err) {
+                console.error(err);
+                onFailure();
+              }
+            }, delay);
+          } else {
+            attempt = 0;
+            liveLabel.textContent = "offline";
+            setPlaceholder("No signal");
+            setMsg("Could not connect — reload to try again", true);
+          }
+        });
+      }
+
+      // ── Auto-connect on load ─────────────────────────────────────────────────────
+      // On iOS low power mode the WebSocket upgrade is silently dropped on the
+      // very first page load — the network stack isn't warm yet. A cheap HEAD
+      // request to the same host forces the stack open before we attempt the WS
+      // upgrade, making the first connection reliable without any retry needed.
+      async function primeAndConnect() {
+        try {
+          await fetch("/home", { method: "HEAD", cache: "no-store" });
+        } catch {
+          // Even a failed fetch warms the stack enough
+        }
+        connect().catch((err) => {
+          console.error(err);
+          onFailure();
+        });
+      }
+
+      if (document.readyState === "complete") {
+        primeAndConnect();
+      } else {
+        window.addEventListener("load", primeAndConnect, { once: true });
       }
     </script>
   </body>

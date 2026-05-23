@@ -26,6 +26,10 @@ pub async fn start_server() {
     }
 
     async fn handle_socket(socket: WebSocket, peers: Peers) {
+        println!(
+            "[WS] new connection (peers in map: {})",
+            peers.lock().unwrap().len()
+        );
         let mut current_peer: Option<String> = None;
         let (mut write, mut read) = socket.split();
         let (sendertx, mut receiverrx) = mpsc::unbounded_channel::<Message>();
@@ -46,7 +50,7 @@ pub async fn start_server() {
                         Ok(msg) => msg,
                         Err(e) => {
                             eprintln!("Invalid signaling message: {e}");
-                            return;
+                            continue;
                         }
                     };
 
@@ -127,10 +131,7 @@ pub async fn start_server() {
                     }
                 }
                 Message::Ping(payload) => {
-                    if sendertx
-                        .send(Message::Pong(payload))
-                        .is_err()
-                    {
+                    if sendertx.send(Message::Pong(payload)).is_err() {
                         break;
                     }
                 }
@@ -161,10 +162,9 @@ pub async fn start_server() {
     const CAM_HTML_TEMPLATE: &str = include_str!("static/cam.html");
 
     async fn home_page() -> Html<String> {
+        // tokio::spawn(connect_camera_to_ws());
         let version = concat!("rusty-cam v", env!("CARGO_PKG_VERSION"));
-        Html(
-            CAM_HTML_TEMPLATE.replace("__RUSTY_CAM_VERSION__", version),
-        )
+        Html(CAM_HTML_TEMPLATE.replace("__RUSTY_CAM_VERSION__", version))
     }
 
     // Build the router
